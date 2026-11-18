@@ -68,20 +68,6 @@ struct LocalSources {
 };
 
 // ==========================================
-// Structure: Cuts
-// Method: Apply shared FD quality thresholds without PT-column selection.
-// ==========================================
-struct Cuts {
-    double snrfcut, snrlow, snrhigh, starcut;
-    double chi2_thresh, flagcut, zplow, zphigh;
-    double gf_lim, imaxcut, jmaxcut;
-    double mag_low, mag_high, psf_chi2_mltp;
-    double r_half_thresh, ft_cut, fg_cut, gold_cut, ext_cut;
-    double star_bar_mltp, expo_bar_mltp;
-    int max_dup;
-};
-
-// ==========================================
 // Function: trim
 // Method: Remove surrounding whitespace from a catalog-list entry.
 // ==========================================
@@ -367,41 +353,4 @@ inline void broadcast_paths(std::vector<std::string> &paths, MPI_Comm comm) {
     }
 }
 
-// ==========================================
-// Structure: ExternalColumns
-// Method: Set one-based positions in the external prefix for each used field.
-// ==========================================
-struct ExternalColumns {
-    int ra, dec, zp, mag;
-    int flags_footprint, flags_foreground, flags_gold, ext_mash;
-};
-
-// ==========================================
-// Structure: ShearRow
-// Method: Keep only the measurements used by source selection and pairing.
-// ==========================================
-struct ShearRow {
-    enum Field {
-        ra, dec, zp, mag, flags_footprint, flags_foreground, flags_gold, ext_mash,
-        poly_chi2, sigma, nstar, imax, jmax, half_light_flux, half_light_area, flag,
-        psf_fwhm, snr_f, gf1, gf2, g1, g2, de, h1, h2, chi2, expo_num, count
-    };
-    std::array<double, count> values{};
-};
-
-// ==========================================
-// Structure: ShearLayout
-// Method: Store the first catalog width and a row-field destination for each input column.
-// ==========================================
-struct ShearLayout {
-    std::vector<int> destinations;
-};
-
-ShearLayout read_shear_layout(const std::string &first_path, const ExternalColumns &external,
-                              const Cuts &cuts, MPI_Comm comm);
-void for_each_local_source(const std::vector<std::string> &paths, const Cuts &cuts,
-                           const ShearLayout &layout, MPI_Comm comm,
-                           const std::function<void(const Source &, const BarDatum &)> &visit);
-LocalSources read_local_sources(const std::vector<std::string> &paths, const Cuts &cuts,
-                                const ShearLayout &layout, MPI_Comm comm);
 } // namespace bcg

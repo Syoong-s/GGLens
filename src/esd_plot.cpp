@@ -45,7 +45,7 @@ PyHandle fd_plot_data(const Config &cfg, const SelfCalibrationDiagnostics &diagn
         PyTuple_SET_ITEM(components.get(), i, component.release());
     }
     return checked(Py_BuildValue("(sLdO)", cfg.fd_plot.c_str(),
-        static_cast<long long>(diagnostics.selected), cfg.cuts.gf_lim, components.get()));
+        static_cast<long long>(diagnostics.selected), cfg.fd_limit(), components.get()));
 }
 
 // ==========================================

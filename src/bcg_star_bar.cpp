@@ -359,9 +359,9 @@ ExposureFits fit_exposure_star_cuts(
 // ==========================================
 StarBarCuts fit_star_bar(const BarRows &bar, const Cuts &cuts, MPI_Comm comm, std::size_t budget) {
     StarBarCuts result;
-    if (cuts.expo_bar_mltp <= 0 && cuts.star_bar_mltp < 0) return result;
+    if (!cuts.bar_enabled()) return result;
     result.enabled = true;
-    result.exposure = cuts.expo_bar_mltp > 0;
+    result.exposure = cuts.exposure_bar_enabled();
     if (!result.exposure) {
         result.global = fit_global_star_cut(bar, cuts.star_bar_mltp, comm); return result;
     }
@@ -412,7 +412,7 @@ bool StarBarCuts::accepts(const BarDatum &b) const {
 // Method: Apply the reference's exposure bar when enabled, otherwise global bar.
 // ==========================================
 void apply_star_bar(LocalSources &local, const Cuts &cuts, MPI_Comm comm) {
-    if (cuts.expo_bar_mltp <= 0 && cuts.star_bar_mltp < 0) return;
+    if (!cuts.bar_enabled()) return;
     if (local.bar_data.size() != local.sources.size())
         throw std::runtime_error("Star-bar metadata does not match source count");
     const auto fitted = fit_star_bar(BarRows(local.bar_data), cuts, comm, 512ULL * 1024 * 1024);

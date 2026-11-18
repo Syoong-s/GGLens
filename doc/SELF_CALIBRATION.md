@@ -35,11 +35,12 @@ The ESD PDF_SYM and jackknife errors condition on the effective fixed coefficien
 | `fd-corrected` | false | Restore raw G1/G2 from FD-corrected catalog moments |
 | `self-calibrate` | false | Fit both Cartesian components on the all-R union |
 | `m1`, `m2`, `c1`, `c2` | 0 | Manual calibration for runs with self-calibration disabled |
-| `selfcal-fd-bins` | 21 | Uniform bins per Cartesian FD component |
+| `gf-lim` | -9999.0 (source cut disabled) | Source FD cutoff and half-width of the FD grid. The example INI uses 0.0015. |
+| `selfcal-fd-bins` | 21 | Count of equal-width bins for each of `gf1` and `gf2` |
 | `selfcal-pdf-bins` | 4 | Number of magnitude cells in each FD-bin PDF |
 | `selfcal-min-count` | 6 | Minimum global rows for a component FD bin |
 | `selfcal-search-width` | 0.2 | Initial zero-centered shear search half-width |
 
-Each component uses the range `[-gf-lim,+gf-lim)`. The fit needs at least two valid, distinct bins per component and positive gains. FD bin scratch is processed one cell at a time, within the configured per-rank buffer budget.
+For positive `gf-lim`, each component divides `[-gf-lim,+gf-lim)` into `selfcal-fd-bins` equal-width bins of width `2 * gf-lim / selfcal-fd-bins`. Each bin includes its left edge. If `gf-lim` is below `-999.0`, the source FD cut is disabled and the fit grid uses a half-width of `0.0015`. The fit needs at least two valid, distinct bins per component and positive gains. FD bin scratch is processed one cell at a time, within the configured per-rank buffer budget.
 
 Rank 0 retains the FD measurements and fits in memory and renders the diagnostic with the ESD figure at the end. The FD figure defaults to `ESD_results_FD.png` beside `ESD_results.dat`. Set `[plots] fd-plot` to change this path. The ESD table records the effective coefficients and the number of selected FD rows.

@@ -33,6 +33,13 @@ struct Config {
     bcg::ShearCalibration calibration = defaults::calibration;
     std::int64_t self_calibration_sources = 0;
     // ==========================================
+    // Function: fd_limit
+    // Method: Keep the self-calibration grid defined when the catalog FD cut is disabled.
+    // ==========================================
+    double fd_limit() const {
+        return bcg::cut_enabled(cuts.gf_lim) ? cuts.gf_lim : defaults::selfcal_fd_limit;
+    }
+    // ==========================================
     // Function: memory_bytes
     // Method: Convert the rank-local MiB budget to an unsigned byte count.
     // ==========================================

@@ -1,5 +1,6 @@
 #pragma once
 #include "bcg_stream.hpp"
+#include "bcg_shear_cuts.hpp"
 
 namespace bcg {
 // ==========================================

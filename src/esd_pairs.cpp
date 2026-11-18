@@ -27,7 +27,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     SelfCalibrationDiagnostics &diagnostics, const bcg::ScratchSpace &scratch, MPI_Comm comm) {
     int rank = 0; MPI_Comm_rank(comm, &rank);
     const auto budget = cfg.memory_bytes();
-    const bool need_bar = cfg.cuts.star_bar_mltp >= 0 || cfg.cuts.expo_bar_mltp > 0;
+    const bool need_bar = cfg.cuts.bar_enabled();
     const auto source_file = scratch.path("quality_sources.bin");
     const auto bar_file = scratch.path("quality_bars.bin");
     {

@@ -51,6 +51,6 @@ Inspection was limited to its first header and first numeric row; both contain *
 | 43 | `parity` |
 | 44 | `Chi2` |
 
-This catalog has `CCD_NUM` as the boundary of the named FQ suffix. Rank 0 counts 44 columns and uses the first layout for the whole run. The compiled external positions select columns 5–6 for coordinates, 17 for photometric redshift and 11 for magnitude. These positions can be overridden under `[external_columns]`.
+Rank 0 counts this catalog's 44 columns and uses the first layout for the whole run. The compiled positions select columns 5–6 for coordinates, 17 for photometric redshift, 11 for magnitude and the last column for exposure chi2. These positions can be overridden under `[external_columns]`. The magnitude and exposure chi2 columns are read when their cuts need them.
 
-Global star-bar cuts use the selected magnitude, flux/area columns 27/28 and PSF size column 30. SNR is flux divided by the square root of area. Per-exposure star-bar fitting requires an `EXPO_NUM` column.
+Global star-bar cuts use the selected magnitude, flux/area columns 27/28 and PSF size column 30. SNR is flux divided by the square root of area. Per-exposure star-bar fitting requires a configured exposure ID column. This catalog provides CCD identifiers.

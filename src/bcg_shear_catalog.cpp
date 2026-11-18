@@ -1,4 +1,4 @@
-#include "bcg_catalog.hpp"
+#include "bcg_shear_cuts.hpp"
 #include <string_view>
 
 namespace bcg {
@@ -7,7 +7,7 @@ using Field = ShearRow::Field;
 
 // ==========================================
 // Function: detect_shear_layout
-// Method: Count the first header's columns and resolve only the used FQ suffix fields.
+// Method: Map the first header's shear.dat fields and the configured metadata positions.
 // ==========================================
 ShearLayout detect_shear_layout(const std::string &path, const ExternalColumns &external,
                                 const Cuts &cuts) {
@@ -26,19 +26,6 @@ ShearLayout detect_shear_layout(const std::string &path, const ExternalColumns &
     if (names.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
         throw std::runtime_error("Shear header exceeds MPI count limit: " + path);
 
-    const auto find_column = [&](std::string_view name, auto begin) {
-        const auto it = std::find(begin, names.cend(), name);
-        if (it != names.cend() && std::find(it + 1, names.cend(), name) != names.cend())
-            throw std::runtime_error("Ambiguous shear field " + std::string(name) + ": " + path);
-        return it;
-    };
-    const auto exposure = find_column("expo_num", names.cbegin());
-    const auto marker = exposure != names.cend() ? exposure : find_column("ccd_num", names.cbegin());
-    if (marker == names.cend())
-        throw std::runtime_error("Shear header requires EXPO_NUM or the legacy CCD_NUM: " + path);
-    if (cuts.expo_bar_mltp > 0 && exposure == names.cend())
-        throw std::runtime_error("Exposure bar requires EXPO_NUM: " + path);
-
     ShearLayout layout;
     layout.destinations.assign(names.size(), -1);
     const auto assign = [&](std::size_t index, Field field) {
@@ -46,40 +33,56 @@ ShearLayout detect_shear_layout(const std::string &path, const ExternalColumns &
             throw std::runtime_error("Shear column assigned twice: " + std::to_string(index + 1));
         layout.destinations[index] = field;
     };
-    const auto prefix_width = marker - names.cbegin();
+    const int width = static_cast<int>(names.size());
     const auto set_external = [&](int column, Field field, const char *key, bool required) {
         if (!required) return;
-        if (column < 1 || column > prefix_width)
-            throw std::runtime_error("external_columns." + std::string(key) +
-                " must point to the external prefix of " + path);
+        if (column < 1 || column > width)
+            throw std::runtime_error("Set external_columns." + std::string(key) +
+                " to a valid one-based column number for " + path);
         assign(static_cast<std::size_t>(column - 1), field);
     };
 
     set_external(external.ra, Field::ra, "ra", true);
     set_external(external.dec, Field::dec, "dec", true);
     set_external(external.zp, Field::zp, "zp", true);
-    set_external(external.mag, Field::mag, "mag", true);
-    set_external(external.flags_footprint, Field::flags_footprint, "flags-footprint", cuts.ft_cut >= 0);
-    set_external(external.flags_foreground, Field::flags_foreground, "flags-foreground", cuts.fg_cut >= 0);
-    set_external(external.flags_gold, Field::flags_gold, "flags-gold", cuts.gold_cut >= 0);
-    set_external(external.ext_mash, Field::ext_mash, "ext-mash", cuts.ext_cut >= 0);
+    set_external(external.mag, Field::mag, "mag", cuts.needs_magnitude());
+    set_external(external.ext_mash, Field::ext_mash, "ext-mash", cut_enabled(cuts.ext_cut));
+    set_external(external.expo_num, Field::expo_num, "expo-num", cuts.exposure_bar_enabled());
+    const int chi2_column = external.expo_chi2 == -1 ? width : external.expo_chi2;
+    set_external(chi2_column, Field::chi2, "expo-chi2", cut_enabled(cuts.chi2_thresh));
 
-    const std::pair<std::string_view, Field> required[] = {
-        {"poly_chi2", Field::poly_chi2}, {"sigma", Field::sigma}, {"nstar", Field::nstar},
-        {"imax", Field::imax}, {"jmax", Field::jmax},
-        {"half_light_flux", Field::half_light_flux}, {"half_light_area", Field::half_light_area},
-        {"flag", Field::flag}, {"psf_fwhm", Field::psf_fwhm}, {"snr_f", Field::snr_f},
-        {"gf1", Field::gf1}, {"gf2", Field::gf2}, {"g1", Field::g1}, {"g2", Field::g2},
-        {"de", Field::de}, {"h1", Field::h1}, {"h2", Field::h2}, {"chi2", Field::chi2}
+    struct NamedColumn {
+        std::string_view name;
+        Field field;
+        bool needed = true;
     };
-    for (const auto &[name, field] : required) {
-        const auto column = find_column(name, marker + 1);
-        if (column == names.cend())
-            throw std::runtime_error("Missing FQ suffix field " + std::string(name) + ": " + path);
-        assign(static_cast<std::size_t>(column - names.cbegin()), field);
+    const NamedColumn shear_fields[] = {
+        // Moments and field distortion are used by measurement.
+        {"g1", Field::g1}, {"g2", Field::g2}, {"de", Field::de},
+        {"h1", Field::h1}, {"h2", Field::h2}, {"gf1", Field::gf1}, {"gf2", Field::gf2},
+        // Read quality columns when their cuts or the stellar bar consume them.
+        {"snr_f", Field::snr_f, cut_enabled(cuts.snrfcut)},
+        {"half_light_flux", Field::half_light_flux, cuts.needs_snr()},
+        {"half_light_area", Field::half_light_area, cuts.needs_snr() || cuts.needs_psf()},
+        {"psf_fwhm", Field::psf_fwhm, cuts.needs_psf()},
+        {"nstar", Field::nstar, cut_enabled(cuts.starcut)},
+        {"poly_chi2", Field::poly_chi2, cut_enabled(cuts.psf_chi2_mltp)},
+        {"flag", Field::flag, cut_enabled(cuts.flagcut)},
+        {"sigma", Field::sigma, cut_enabled(cuts.flagcut)},
+        {"imax", Field::imax, cut_enabled(cuts.imaxcut)},
+        {"jmax", Field::jmax, cut_enabled(cuts.jmaxcut)},
+    };
+    // CatalogCombiner appends shear.dat after the external catalog. A repeated
+    // label in the external data therefore precedes the shear.dat occurrence.
+    for (const auto &[name, field, needed] : shear_fields) {
+        if (!needed) continue;
+        auto column = names.size();
+        while (column > 0 && (names[column - 1] != name || layout.destinations[column - 1] >= 0))
+            --column;
+        if (column == 0)
+            throw std::runtime_error("Missing shear.dat field " + std::string(name) + ": " + path);
+        assign(column - 1, field);
     }
-    if (exposure != names.cend())
-        assign(static_cast<std::size_t>(exposure - names.cbegin()), Field::expo_num);
     return layout;
 }
 
@@ -111,53 +114,6 @@ bool parse_shear_values(const std::string &line, ShearRow &row, const ShearLayou
     return finite_row;
 }
 
-// ==========================================
-// Function: passes_shear_cuts
-// Method: Apply FD quality cuts using mapped fields and retain celestial moments.
-// ==========================================
-bool passes_shear_cuts(const ShearRow &row, const Cuts &cuts, Source &s, BarDatum &bar) {
-    const auto &v = row.values;
-    if (cuts.ft_cut >= 0 && std::abs(v[Field::flags_footprint] - cuts.ft_cut) > 1e-3) return false;
-    if (cuts.fg_cut >= 0 && std::abs(v[Field::flags_foreground] - cuts.fg_cut) > 1e-3) return false;
-    if (cuts.gold_cut >= 0 && std::abs(v[Field::flags_gold] - cuts.gold_cut) > 1e-3) return false;
-    if (cuts.ext_cut >= 0 && std::abs(v[Field::ext_mash] - cuts.ext_cut) > 1e-3) return false;
-    const double area = v[Field::half_light_area], psf = v[Field::psf_fwhm];
-    if (area <= 0 || psf <= 0 || v[Field::snr_f] < cuts.snrfcut) return false;
-    const double snr = v[Field::half_light_flux] / std::sqrt(area);
-    if (cuts.snrlow > 0 && snr < cuts.snrlow) return false;
-    if (cuts.snrhigh > 0 && snr > cuts.snrhigh) return false;
-    constexpr double pi = 3.14159265358979323846;
-    if (cuts.r_half_thresh > 0) {
-        const double rhalf = std::sqrt(area / pi) * 0.2628 * 2.0;
-        if (rhalf <= cuts.r_half_thresh * psf) return false;
-    }
-    if (v[Field::mag] < cuts.mag_low || v[Field::mag] > cuts.mag_high) return false;
-    if (v[Field::poly_chi2] > cuts.psf_chi2_mltp || v[Field::nstar] < cuts.starcut ||
-        v[Field::chi2] > cuts.chi2_thresh) return false;
-    if (cuts.flagcut > 0 && v[Field::flag] * v[Field::sigma] > cuts.flagcut) return false;
-    if (v[Field::imax] >= cuts.imaxcut || v[Field::jmax] >= cuts.jmaxcut) return false;
-    if (v[Field::zp] <= cuts.zplow || v[Field::zp] >= cuts.zphigh) return false;
-    if (std::abs(v[Field::gf1]) > cuts.gf_lim || std::abs(v[Field::gf2]) > cuts.gf_lim) return false;
-    if (v[Field::ra] < 0 || v[Field::ra] >= 360 || v[Field::dec] < -90 || v[Field::dec] > 90) return false;
-    s = {v[Field::ra], v[Field::dec], v[Field::zp], v[Field::g1], v[Field::g2],
-         v[Field::de], v[Field::h1], v[Field::h2]};
-    s.gf1 = v[Field::gf1];
-    s.gf2 = v[Field::gf2];
-    if (cuts.star_bar_mltp >= 0 || cuts.expo_bar_mltp > 0) {
-        bar.mag_i = v[Field::mag];
-        bar.snr = snr;
-        bar.size_rel = (2.0 * 0.2628 * std::sqrt(area / pi) - psf) / psf;
-        if (cuts.expo_bar_mltp > 0) {
-            const double exposure = v[Field::expo_num];
-            if (exposure < 1 || exposure > 10000000)
-                throw std::runtime_error("Invalid exposure ID for enabled exposure bar");
-            bar.exposure_id = static_cast<int>(std::llround(exposure));
-            if (std::abs(exposure - bar.exposure_id) > 0.01)
-                throw std::runtime_error("Non-integer exposure ID for enabled exposure bar");
-        }
-    }
-    return true;
-}
 } // namespace
 
 // ==========================================
@@ -178,67 +134,21 @@ ShearLayout read_shear_layout(const std::string &first_path, const ExternalColum
 }
 
 // ==========================================
-// Function: for_each_local_source
-// Method: Stream adjacent-position groups using the broadcast layout and skip all catalog headers.
+// Function: for_each_shear_row
+// Method: Decode one catalog with the shared column mapping and emit its numeric rows in order.
 // ==========================================
-void for_each_local_source(const std::vector<std::string> &paths, const Cuts &cuts,
-                           const ShearLayout &layout, MPI_Comm comm,
-                           const std::function<void(const Source &, const BarDatum &)> &visit) {
-    int rank = 0, size = 1;
-    MPI_Comm_rank(comm, &rank);
-    MPI_Comm_size(comm, &size);
-    for (std::size_t i = 0; i < paths.size(); ++i) {
-        if (size > 1 && (rank == 0 || static_cast<int>(i % (size - 1)) != rank - 1)) continue;
-        std::ifstream in(paths[i]);
-        if (!in) throw std::runtime_error("Cannot read shear catalog: " + paths[i]);
-        in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        std::string line;
-        std::size_t lineno = 1, duplicate_count = 0;
-        double last_ra = 0, last_dec = 0;
-        std::vector<ShearRow> duplicates;
-        duplicates.reserve(std::min<std::size_t>(static_cast<std::size_t>(cuts.max_dup), 64));
-        const auto flush = [&] {
-            if (duplicate_count <= static_cast<std::size_t>(cuts.max_dup))
-                for (const auto &row : duplicates) {
-                    Source source;
-                    BarDatum bar;
-                    if (passes_shear_cuts(row, cuts, source, bar)) visit(source, bar);
-                }
-            duplicates.clear();
-            duplicate_count = 0;
-        };
-        while (std::getline(in, line)) {
-            ++lineno;
-            ShearRow row;
-            if (!parse_shear_values(line, row, layout, paths[i], lineno)) continue;
-            const double ra = row.values[Field::ra], dec = row.values[Field::dec];
-            if (duplicate_count && (std::abs(ra - last_ra) > 1e-7 ||
-                                    std::abs(dec - last_dec) > 1e-7)) flush();
-            if (!duplicate_count) {
-                last_ra = ra;
-                last_dec = dec;
-            }
-            ++duplicate_count;
-            if (duplicate_count <= static_cast<std::size_t>(cuts.max_dup))
-                duplicates.push_back(row);
-        }
-        flush();
-        if (!in.eof()) throw std::runtime_error("I/O failure reading: " + paths[i]);
+void for_each_shear_row(const std::string &path, const ShearLayout &layout,
+                        const std::function<void(const ShearRow &)> &visit) {
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("Cannot read shear catalog: " + path);
+    in.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::string line;
+    std::size_t lineno = 1;
+    while (std::getline(in, line)) {
+        ++lineno;
+        ShearRow row;
+        if (parse_shear_values(line, row, layout, path, lineno)) visit(row);
     }
-}
-
-// ==========================================
-// Function: read_local_sources
-// Method: Collect selected rows and aligned optional bar metadata through the streaming reader.
-// ==========================================
-LocalSources read_local_sources(const std::vector<std::string> &paths, const Cuts &cuts,
-                                const ShearLayout &layout, MPI_Comm comm) {
-    LocalSources result;
-    const bool need_bar = cuts.star_bar_mltp >= 0 || cuts.expo_bar_mltp > 0;
-    for_each_local_source(paths, cuts, layout, comm, [&](const Source &s, const BarDatum &b) {
-        result.sources.push_back(s);
-        if (need_bar) result.bar_data.push_back(b);
-    });
-    return result;
+    if (!in.eof()) throw std::runtime_error("I/O failure reading: " + path);
 }
 } // namespace bcg

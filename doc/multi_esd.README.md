@@ -10,24 +10,24 @@
 - No compilation or installation is required. Uses Python standard library,
   NumPy and Matplotlib; the noninteractive Agg backend is selected explicitly.
 
-## Run from the source directory
+## Run from the project root
 
 Activate `pysx` on the cluster, then use this portable Linux command:
 
 ```bash
-python multi_esd.py --input result_A/ESD_results.dat --label "Sample A" --input result_B/ESD_results.dat --label "Sample B" --output multi_esd.png
+python script/multi_esd.py --input result_A/ESD_results.dat --label "Sample A" --input result_B/ESD_results.dat --label "Sample B" --output multi_esd.png
 ```
 
 Equivalently, supply the ordered lists together:
 
 ```bash
-python multi_esd.py --input result_A/ESD_results.dat result_B/ESD_results.dat --label "Sample A" "Sample B" --output multi_esd.png
+python script/multi_esd.py --input result_A/ESD_results.dat result_B/ESD_results.dat --label "Sample A" "Sample B" --output multi_esd.png
 ```
 ```bash
-python multi_esd.py --input /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-star-bar/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-star-bar7/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-lt20/ESD_results.dat --label "2.5-Sigma" "7-Sigma" "LT20" --output multi_esd.png
+python script/multi_esd.py --input /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-star-bar/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-star-bar7/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcg/result-lt20/ESD_results.dat --label "2.5-Sigma" "7-Sigma" "LT20" --output multi_esd.png
 ```
 
-python multi_esd.py --input /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr15/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr15/ESD_results_m.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr40/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr40/ESD_results_m.dat --label "SNR15" "SNR15-Calib" "SNR40" "SNR40-Calib" --output multi_esd_yband.png --x-spread 0.08
+python script/multi_esd.py --input /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr15/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr15/ESD_results_m.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr40/ESD_results.dat /lustre/home/acct-phyzj/share/DES/testy/cluster_lensing/mode_bcgo/yband/snr40/ESD_results_m.dat --label "SNR15" "SNR15-Calib" "SNR40" "SNR40-Calib" --output multi_esd_yband.png --x-spread 0.08
 
 Every input needs a nonempty label; input and label counts must match. Quote
 labels containing spaces. Inputs, outputs, labels and the number of inputs

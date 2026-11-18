@@ -45,13 +45,15 @@ FdLineFit fit_selfcal_line(const std::vector<FdCalibrationPoint> &points) {
 
 // ==========================================
 // Function: SelfCalibration constructor
-// Method: Allocate fixed-size component/FD spools within a divided rank memory quota.
+// Method: Build equal-width FD bins and allocate their spools within the rank's memory quota.
 // ==========================================
 SelfCalibration::SelfCalibration(const Config &cfg, const bcg::ScratchSpace &scratch)
     : cfg_(cfg), scratch_(scratch), edges_(static_cast<std::size_t>(cfg.selfcal_fd_bins)+1) {
-    const double dx = 2*cfg.cuts.gf_lim/cfg.selfcal_fd_bins;
-    for (int i = 0; i <= cfg.selfcal_fd_bins; ++i) edges_[i] = -cfg.cuts.gf_lim+dx*i;
-    edges_.front() = -cfg.cuts.gf_lim; edges_.back() = cfg.cuts.gf_lim;
+    const double limit = cfg.fd_limit();
+    const double width = 2 * limit / cfg.selfcal_fd_bins;
+    for (int i = 0; i <= cfg.selfcal_fd_bins; ++i) edges_[i] = -limit + width * i;
+    edges_.front() = -limit;
+    edges_.back() = limit;
     const auto bytes = cfg.memory_bytes()/16/(2*static_cast<std::size_t>(cfg.selfcal_fd_bins));
     for (int component = 0; component < 2; ++component) {
         field_sum_[component].assign(cfg.selfcal_fd_bins, 0);

@@ -6,7 +6,7 @@ This C++17/MPI program measures excess surface density (ESD) around the brightes
 
 The build uses an MPI C++17 compiler, a CPython development environment with `python3-config --embed` support, NumPy and Matplotlib. The Python development and runtime environment should be the same. `make` embeds the plotting module in `libesd_plot.a` and links it into `esd_bcg_mpi`.
 
-From the source directory, activate the appropriate Python environment and run:
+From the project root, activate the appropriate Python environment and run:
 
 ```bash
 make -j4
@@ -14,7 +14,7 @@ cp esd.example.ini esd.ini
 mpirun -np 3 ./esd_bcg_mpi
 ```
 
-Set `group-list` and `shear-list` to your data lists before launching. The executable takes no arguments. Compiled defaults are collected in [esd_defaults.hpp](esd_defaults.hpp). Rank 0 reads `esd.ini` from the run directory when present. Set `FQ_GGLENS_INI` to select another file, for example `FQ_GGLENS_INI=sample.ini mpirun -np 3 ./esd_bcg_mpi`. Keys omitted from the INI retain their compiled defaults. Paths in the INI are relative to the run directory, and paths within a catalog list are relative to that list. INI values may be quoted. Use `#` or `;` on a separate line for comments.
+Set `group-list` and `shear-list` to your data lists before launching. The executable takes no arguments. Compiled defaults are collected in [esd_defaults.hpp](../include/esd_defaults.hpp). Rank 0 reads `esd.ini` from the run directory when present. Set `FQ_GGLENS_INI` to select another file, for example `FQ_GGLENS_INI=sample.ini mpirun -np 3 ./esd_bcg_mpi`. Keys omitted from the INI retain their compiled defaults. Paths in the INI are relative to the run directory, and paths within a catalog list are relative to that list. INI values may be quoted. Use `#` or `;` on a separate line for comments.
 
 On pi2, build in a compute allocation with `module load gcc/12.3.0 openmpi/4.1.6-gcc-12.3.0` and `conda activate pysx` (CPython 3.12, NumPy 2.4.3, Matplotlib 3.10.9). Use `make PYTHON_CONFIG="$CONDA_PREFIX/bin/python3-config"` and run `mpirun -np "$SLURM_NTASKS" ./esd_bcg_mpi` in the batch script. Move run-specific settings from older Slurm commands into an INI for each run. The checked local toolchain was GCC 15.2.0, Open MPI 5.0.10, CPython 3.12.13, NumPy 2.5.0 and Matplotlib 3.11.0.
 
@@ -31,42 +31,52 @@ make -j4 CXX="$PIXI_BIN/mpicxx" PYTHON_CONFIG="$PIXI_PREFIX/bin/python3-config"
 
 Each numbered block is an independent group-ID namespace. The same numeric group ID may occur in different blocks. For a block with selected lenses, the program streams its listed member file once, takes column 1 as galaxy ID, column 2 as group ID, and column 3 equal to 1 as the BCG indicator. It then streams the listed galaxy file once and takes columns 1–2 (RA, Dec) from the 1-based row numbered by that galaxy ID. Missing or duplicate BCGs within one block are fatal errors. A `group -> member galaxy ID` file without a BCG flag is not used.
 
-`[run] shear-list` takes one catalog path per nonblank line. Quoted paths and `#` comments are accepted. Each catalog begins with one header line. At startup, rank 0 counts the named columns in the first header and maps the used FQ column names case-insensitively after `EXPO_NUM`. The other readers skip the first line and use the broadcast schema. Use one common layout per run, including the order of columns. Extra unused columns can appear in either part of the schema.
+`[run] shear-list` takes one catalog path per nonblank line. Quoted paths and `#` comments are accepted. Each catalog begins with one header line. At startup, rank 0 counts the columns in the first header and matches the measurement fields from `shear.dat` by name across that header, ignoring case. For repeated labels, it uses the rightmost position after excluding the manually configured fields, following the combined catalog's external-data-then-shear order. The other readers skip their header and use the broadcast mapping. Use one common layout per run, including the order of columns.
 
-For a legacy catalog without `EXPO_NUM`, rank 0 uses `CCD_NUM` as the boundary of the FQ suffix. The per-exposure bar requires `EXPO_NUM`. See [LEGACY_CATALOG.md](LEGACY_CATALOG.md).
-
-Specify one-based positions in the external prefix under `[external_columns]`. These positions are independent of header spelling.
+Set fields supplied outside `shear.dat` by position under `[external_columns]`. Positions are one-based and independent of header spelling. The [legacy i-band catalog](LEGACY_CATALOG.md) is one example. The required `shear.dat` columns are `g1`, `g2`, `de`, `h1`, `h2`, `gf1` and `gf2`. Quality columns are read when used by enabled cuts.
 
 | Key | DES default | Used for |
 | --- | ---: | --- |
 | `ra`, `dec` | 5, 6 | High-precision sky position in degrees and adjacent duplicate grouping |
 | `zp` | 17 | Source photometric redshift |
-| `mag` | 11 | Magnitude limits and star-bar fitting |
-| `flags-footprint`, `flags-foreground`, `flags-gold`, `ext-mash` | 1, 2, 3, 4 | Corresponding external flag cuts when enabled |
+| `mag` | 11 | Magnitude limits and star-bar fitting when enabled |
+| `ext-mash` | 4 | External classification when `ext-cut` is enabled |
+| `expo-num` | 0 (unset) | Actual exposure ID, required when `expo-bar-mltp` is enabled |
+| `expo-chi2` | -1 (last column) | Exposure quality value when `chi2-thresh` is enabled. Set its position when it is stored elsewhere. |
 
 The adjacent-position grouping uses a tolerance of `1e-7` degrees. Mapped numeric fields with NaN/Inf cause the row to be skipped.
 
-| INI key under `[cuts]` | Default | Selection rule |
+Every compiled `[cuts]` value defaults to `-9999.0`. A value below `-999.0` disables that cut. Values at or above `-999.0` activate the cut, with zero and negative values used as thresholds or multipliers. The values below are the overrides supplied by [esd.example.ini](../esd.example.ini).
+
+| INI key under `[cuts]` | Example INI value | Selection rule |
 | --- | ---: | --- |
-| `snrfcut`, `snrlow`, `snrhigh` | 0, 0, 0 | Fourier SNR lower bound; positive lower/upper bounds for `h_flux/sqrt(h_area)` |
+| `snrfcut`, `snrlow`, `snrhigh` | 0, 0, 0 | Fourier SNR lower bound; inclusive lower/upper bounds for `h_flux/sqrt(h_area)` |
 | `starcut`, `chi2-thresh` | 16, 0.01 | star statistic ≥ cut and row chi2 ≤ cut |
 | `imaxcut`, `jmaxcut` | 64, 64 | maxima strictly below cuts |
 | `mag-low`, `mag-high` | 0, 25 | inclusive interval for the configured magnitude |
 | `zplow`, `zphigh` | 0, 5 | strictly inside photo-z interval |
-| `gf-lim` | 0.0015 | absolute field distortion ≤ cut for both components |
-| `psf-chi2-mltp`, `r-half-thresh` | 3, 0 | polynomial PSF chi2 ≤ cut; positive half-size threshold enables size cut |
-| `ft-cut`, `fg-cut`, `gold-cut`, `ext-cut` | -1, -10, -10, -4 | nonnegative values enable equality cuts (tolerance `1e-3`) |
+| `psf-chi2-mltp`, `r-half-thresh` | 3, 0 | polynomial PSF chi2 ≤ cut; half-light diameter must exceed the threshold times PSF FWHM |
+| `ext-cut` | -4 | match the external classification within `1e-3` |
 | `max-dup` | 5 | reject a whole adjacent-position group above this count |
-| `star-bar-mltp`, `expo-bar-mltp` | -3, -3 | global bar activates at ≥0; per-exposure bar activates at >0 and takes precedence |
-| `flagcut` | 0 | disabled at 0; a positive value optionally enables the flag × significance upper bound |
+| `star-bar-mltp`, `expo-bar-mltp` | -3, -3 | sigma multipliers for the global and per-exposure bars. The per-exposure bar takes precedence when both are enabled. |
+| `flagcut` | 0 | inclusive upper bound for flag × significance |
 
-The flag cut is commented out in the reference reader, so its default is inactive here. The bar settings default to disabled. When enabled, the program follows the reference size–magnitude histogram and sigma-threshold procedure across MPI ranks before pairing sources. The global bar remains available for legacy input. A positive `expo-bar-mltp` requires a unique `expo_num` field and fails immediately on the legacy header, even when no rows pass cuts. The CCD number cannot identify a physical exposure. Rows with nonpositive `h_area` or PSF size are rejected because the size and SNR expressions are undefined there.
+The example INI enables `expo-bar-mltp = -3`, so supply the exposure ID column in `expo-num` for that sample or set `expo-bar-mltp` below `-999.0` to disable it. Its `snrhigh = 0` and `ext-cut = -4` also apply as literal thresholds.
+
+When the stellar bar is enabled, the program follows the reference size–magnitude histogram and sigma-threshold procedure across MPI ranks before pairing sources. The global bar uses the configured magnitude. For the per-exposure bar, set `expo-num` to the column containing the exposure IDs. The SNR and size calculations require positive half-light area. The size ratio and the stellar bar also require positive PSF FWHM.
 
 `[run] cache` is optional. A valid cache stores the fully selected BCG lens table and avoids rescanning the large group, member, and galaxy catalogs on later runs with the same cuts and input file identities. The key includes ordered block numbers, canonical input paths, sizes, modification timestamps, and lens selection limits. A stale cache, including the previous fixed-name cache format, is regenerated atomically. Store it in a writable directory.
 
+## Source layout
+
+- `include/` contains headers and compiled defaults. `src/` contains the C++ implementations.
+- [bcg_shear_catalog.cpp](../src/bcg_shear_catalog.cpp) owns the column tables, MPI mapping and numeric row reader. To add a column, declare its slot in [bcg_shear_catalog.hpp](../include/bcg_shear_catalog.hpp) and add its position or name to the mapping in `detect_shear_layout`.
+- [bcg_shear_cuts.cpp](../src/bcg_shear_cuts.cpp) owns the row predicates, duplicate grouping and extraction of the selected source and bar data. Add a threshold in [bcg_shear_cuts.hpp](../include/bcg_shear_cuts.hpp), register its defaults and INI key, and add its predicate in `select_shear_row`.
+- `script/` contains the embedded plotting module and the offline comparison script. `doc/` contains the documentation. The root Makefile puts build objects under `build/` and links `esd_bcg_mpi` in the project root.
+
 ## Measurement and output
 
-Set `[calibration] fd-corrected = true` if the shear catalog already removed the full two-component FD response from `g1/g2`. The reader restores raw Cartesian moments before either measurement pass. `[calibration] self-calibrate = true` fits both components on the union of sources matched to at least one lens. Otherwise the program uses the configured `m1/m2/c1/c2` values, which default to zero. See [SELF_CALIBRATION.md](SELF_CALIBRATION.md) for the exact moment transformation.
+Set `[calibration] fd-corrected = true` if the shear catalog already removed the full two-component FD response from `g1/g2`. The reader restores raw Cartesian moments before either measurement pass. `[calibration] self-calibrate = true` fits both components on the union of sources matched to at least one lens. Otherwise the program uses the configured `m1/m2/c1/c2` values, which default to zero. `[calibration] gf-lim` sets the absolute source FD cut for both components and the half-width of the FD fit grid. The example INI uses `0.0015`. See [SELF_CALIBRATION.md](SELF_CALIBRATION.md) for the binning and moment transformation.
 
 The C++ program calculates comoving distances for flat Lambda-CDM, streams local source catalogs in bounded chunks, searches each chunk around BCGs with the same spherical 3D KD-tree and geometry, applies the lens-source redshift cut, and writes tangential and cross-component PDF_SYM inputs into compact radial scratch files. It uses logarithmic radial bins in comoving `h^-1 Mpc`. BCG positions also determine spherical k-means jackknife regions. PDF_SYM uses the original equal-probability bins, sign-test chi-squared search, and weighted jackknife expression. Candidate histograms are batched into MPI reductions to reduce communication. The NFW reference uses an M_180m profile and the selected concentration model.
 
@@ -77,7 +87,7 @@ The result table contains `R_low R_high R_eff n_pair ESD_meas ESD_sigma ESD_cros
 - `[run] memory-mb` sets the buffer budget per MPI rank in **MiB**, default **512**, minimum 64. It controls the source chunk, total bin write buffers, current-bin RAM cache, pair scan block and exact-quantile sort block. It is a working-buffer budget, not an OS-enforced RSS limit; lens/file metadata, MPI, allocator overhead and filesystem cache are additional. Internal dimension checks reject oversized duplicate/bin/replica/exposure metadata configurations; at most 256 R bins are supported to bound simultaneously open spool files. At 40 ranks/node the default reserves substantial room beneath the 160 GiB/node allocation.
 - `[run] scratch-dir` sets the writable scratch parent. Default: `.bcg_scratch` beside the absolute output path. Each MPI invocation creates a unique run directory and a separate rank directory. A shared filesystem works, and identically named node-local directories can also be used when provisioned on every allocated node.
 
-The flow first streams quality/MAX_DUP-selected source rows with raw shear moments and optional star-bar metadata into binary scratch files. The global stellar bar is fitted once before lens association; exposure bars use bounded histogram batches but keep the original fallback averaged over all successful exposures. Source rows then pass the fitted threshold and enter bounded KD-tree chunks. Original input-file ownership among ranks is preserved. Adjacent-position groups are completed before a source row is emitted, so chunk boundaries cannot split MAX_DUP decisions.
+The flow first streams quality-selected source rows with raw shear moments and optional star-bar metadata into binary scratch files. The global stellar bar is fitted once before lens association; exposure bars use bounded histogram batches but keep the original fallback averaged over all successful exposures. Source rows then pass the fitted threshold and enter bounded KD-tree chunks. Original input-file ownership among ranks is preserved. When the duplicate cut is enabled, adjacent-position groups are completed before any member is emitted.
 
 Every pair is written directly into exactly one R-bin file. Its scratch record contains four **double** PDF inputs and the lens index (40 bytes); log(R), lens presence and region counts are accumulated separately. There is no full-pair vector or second radial copy. Source/bar scratch files are removed after pairing. During measurement only one small bin may be cached, up to half the rank budget; larger bins stay on disk and are scanned through fixed blocks. A completed bin is released and its file removed immediately.
 

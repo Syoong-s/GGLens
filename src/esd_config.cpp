@@ -40,6 +40,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"calibration.m2", &c.calibration.m2},
         {"calibration.c1", &c.calibration.c1},
         {"calibration.c2", &c.calibration.c2},
+        {"calibration.gf-lim", &c.cuts.gf_lim},
         {"calibration.selfcal-fd-bins", &c.selfcal_fd_bins},
         {"calibration.selfcal-pdf-bins", &c.selfcal_pdf_bins},
         {"calibration.selfcal-min-count", &c.selfcal_min_count},
@@ -48,10 +49,9 @@ void apply_ini(Config &c, const std::string &text) {
         {"external_columns.dec", &c.external_columns.dec},
         {"external_columns.zp", &c.external_columns.zp},
         {"external_columns.mag", &c.external_columns.mag},
-        {"external_columns.flags-footprint", &c.external_columns.flags_footprint},
-        {"external_columns.flags-foreground", &c.external_columns.flags_foreground},
-        {"external_columns.flags-gold", &c.external_columns.flags_gold},
         {"external_columns.ext-mash", &c.external_columns.ext_mash},
+        {"external_columns.expo-num", &c.external_columns.expo_num},
+        {"external_columns.expo-chi2", &c.external_columns.expo_chi2},
         {"cuts.snrfcut", &c.cuts.snrfcut},
         {"cuts.snrlow", &c.cuts.snrlow},
         {"cuts.snrhigh", &c.cuts.snrhigh},
@@ -60,16 +60,12 @@ void apply_ini(Config &c, const std::string &text) {
         {"cuts.flagcut", &c.cuts.flagcut},
         {"cuts.zplow", &c.cuts.zplow},
         {"cuts.zphigh", &c.cuts.zphigh},
-        {"cuts.gf-lim", &c.cuts.gf_lim},
         {"cuts.imaxcut", &c.cuts.imaxcut},
         {"cuts.jmaxcut", &c.cuts.jmaxcut},
         {"cuts.mag-low", &c.cuts.mag_low},
         {"cuts.mag-high", &c.cuts.mag_high},
         {"cuts.psf-chi2-mltp", &c.cuts.psf_chi2_mltp},
         {"cuts.r-half-thresh", &c.cuts.r_half_thresh},
-        {"cuts.ft-cut", &c.cuts.ft_cut},
-        {"cuts.fg-cut", &c.cuts.fg_cut},
-        {"cuts.gold-cut", &c.cuts.gold_cut},
         {"cuts.ext-cut", &c.cuts.ext_cut},
         {"cuts.max-dup", &c.cuts.max_dup},
         {"cuts.star-bar-mltp", &c.cuts.star_bar_mltp},
@@ -146,23 +142,30 @@ void validate_config(Config &c) {
           c.dzmin >= 0 && c.omega_m > 0 && c.omega_m < 1 && c.h > 0 && c.nfw_c > 0 &&
           c.conc_min > 0 && c.conc_max >= c.conc_min && c.n_r_bins > 0 && c.n_jack > 1 && c.pdf_bins > 0))
         throw std::runtime_error("Invalid measurement parameter range");
-    if (!(c.cuts.max_dup > 0 && c.cuts.gf_lim >= 0 &&
-          c.cuts.mag_high >= c.cuts.mag_low && c.cuts.zphigh > c.cuts.zplow &&
-          (c.cuts.snrlow <= 0 || c.cuts.snrhigh <= 0 ||
-           c.cuts.snrhigh >= c.cuts.snrlow)))
+    const auto &cuts = c.cuts;
+    using bcg::cut_enabled;
+    const bool limit_duplicates = cut_enabled(cuts.max_dup);
+    if (limit_duplicates && (!(cuts.max_dup >= 1 && cuts.max_dup <= std::numeric_limits<int>::max()) ||
+                             cuts.max_dup != std::trunc(cuts.max_dup)))
+        throw std::runtime_error("cuts.max-dup must be a positive integer or below -999");
+    if (cut_enabled(cuts.gf_lim) && cuts.gf_lim < 0)
+        throw std::runtime_error("calibration.gf-lim must be nonnegative or below -999");
+    if ((cut_enabled(cuts.mag_low) && cut_enabled(cuts.mag_high) && cuts.mag_high < cuts.mag_low) ||
+        (cut_enabled(cuts.zplow) && cut_enabled(cuts.zphigh) && cuts.zphigh <= cuts.zplow) ||
+        (cut_enabled(cuts.snrlow) && cut_enabled(cuts.snrhigh) && cuts.snrhigh < cuts.snrlow))
         throw std::runtime_error("Invalid shear-cut parameter range");
     if (static_cast<std::uint64_t>(c.pdf_bins + 1LL) * 400 > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ||
         c.n_jack == std::numeric_limits<int>::max())
         throw std::runtime_error("PDF/replica dimensions exceed MPI count limits");
     if (c.memory_mib < 64) throw std::runtime_error("run.memory-mb must be at least 64 MiB");
     const auto budget = c.memory_bytes();
-    if (static_cast<std::uint64_t>(c.cuts.max_dup) * sizeof(bcg::ShearRow) > budget / 16 ||
+    if ((limit_duplicates && static_cast<std::uint64_t>(cuts.max_dup) * sizeof(bcg::ShearRow) > budget / 16) ||
         static_cast<std::uint64_t>(c.pdf_bins + 1LL) * 3200 > budget / 16 ||
         static_cast<std::uint64_t>(c.n_jack + 1LL) * c.pdf_bins * 64 > budget / 16 ||
         static_cast<std::uint64_t>(c.n_r_bins) * 16384 > budget / 8 || c.n_r_bins > 256)
         throw std::runtime_error("Bin/replica/duplicate configuration exceeds memory or open-file budget");
     if (c.self_calibrate) {
-        if (!(c.cuts.gf_lim > 0 && c.selfcal_fd_bins >= 2 && c.selfcal_fd_bins <= 100 &&
+        if (!(c.fd_limit() > 0 && c.selfcal_fd_bins >= 2 && c.selfcal_fd_bins <= 100 &&
               c.selfcal_pdf_bins >= 2 && c.selfcal_pdf_bins <= 200 &&
               c.selfcal_min_count > c.selfcal_pdf_bins && c.selfcal_search_width > 0))
             throw std::runtime_error("Invalid self-calibration FD settings");
