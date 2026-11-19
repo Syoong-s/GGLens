@@ -4,9 +4,11 @@ PYTHON_CONFIG ?= python3-config
 
 TARGET = esd_bcg_mpi
 BUILD_DIR = build
-PLOT_OBJECT = $(BUILD_DIR)/esd_plot.o
-PLOT_LIB = $(BUILD_DIR)/libesd_plot.a
-SOURCES = $(filter-out src/esd_plot.cpp,$(wildcard src/*.cpp))
+FIT_OBJECT = $(BUILD_DIR)/esd_fit_backend.o
+FIT_LIB = $(BUILD_DIR)/libesd_fit.a
+FIT_MODULES = esd_nfw esd_two_halo esd_profiles esd_plot esd_fit
+FIT_SOURCES = $(addprefix $(BUILD_DIR)/,$(addsuffix _source.inc,$(FIT_MODULES)))
+SOURCES = $(filter-out src/esd_fit_backend.cpp,$(wildcard src/*.cpp))
 OBJECTS = $(patsubst src/%.cpp,$(BUILD_DIR)/%.o,$(SOURCES))
 
 PYTHON_PREFIX = $(shell $(PYTHON_CONFIG) --exec-prefix)
@@ -15,17 +17,17 @@ PYTHON_LDFLAGS = $(shell $(PYTHON_CONFIG) --ldflags --embed) -Wl,-rpath,$(PYTHON
 
 all: $(TARGET)
 
-$(TARGET): $(OBJECTS) $(PLOT_LIB)
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(OBJECTS) $(PLOT_LIB) $(PYTHON_LDFLAGS) $(LDLIBS)
+$(TARGET): $(OBJECTS) $(FIT_LIB)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(OBJECTS) $(FIT_LIB) $(PYTHON_LDFLAGS) $(LDLIBS)
 
-$(PLOT_LIB): $(PLOT_OBJECT)
+$(FIT_LIB): $(FIT_OBJECT)
 	$(AR) rcs $@ $<
 
-$(PLOT_OBJECT): src/esd_plot.cpp $(BUILD_DIR)/esd_plot_source.inc Makefile
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Iinclude -I$(BUILD_DIR) $(PYTHON_INCLUDES) -DFQ_PLOT_PYTHON='"$(PYTHON_PREFIX)/bin/python3"' -MMD -MP -c -o $@ $<
+$(FIT_OBJECT): src/esd_fit_backend.cpp $(FIT_SOURCES) Makefile
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -Iinclude -I$(BUILD_DIR) $(PYTHON_INCLUDES) -DFQ_ESD_PYTHON='"$(PYTHON_PREFIX)/bin/python3"' -MMD -MP -c -o $@ $<
 
-$(BUILD_DIR)/esd_plot_source.inc: script/esd_plot.py Makefile | $(BUILD_DIR)
-	{ printf '%s\n' 'static constexpr char plot_source[] = R"FQPLOT('; cat $<; printf '%s\n' ')FQPLOT";'; } > $@.tmp
+$(BUILD_DIR)/%_source.inc: script/%.py Makefile | $(BUILD_DIR)
+	{ printf '%s\n' 'static constexpr char $*_source[] = R"FQPY('; cat $<; printf '%s\n' ')FQPY";'; } > $@.tmp
 	mv $@.tmp $@
 
 $(BUILD_DIR)/%.o: src/%.cpp Makefile | $(BUILD_DIR)
@@ -35,9 +37,9 @@ $(BUILD_DIR):
 	mkdir -p $@
 
 clean:
-	rm -f $(TARGET) $(OBJECTS) $(PLOT_LIB) $(PLOT_OBJECT) $(OBJECTS:.o=.d) $(PLOT_OBJECT:.o=.d) $(BUILD_DIR)/esd_plot_source.inc $(BUILD_DIR)/esd_plot_source.inc.tmp
+	rm -f $(TARGET) $(OBJECTS) $(FIT_LIB) $(FIT_OBJECT) $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d) $(FIT_SOURCES) $(addsuffix .tmp,$(FIT_SOURCES))
 	@rmdir $(BUILD_DIR) 2>/dev/null || true
 
--include $(OBJECTS:.o=.d) $(PLOT_OBJECT:.o=.d)
+-include $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d)
 
 .PHONY: all clean

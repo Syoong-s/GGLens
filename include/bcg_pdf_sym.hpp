@@ -61,25 +61,4 @@ inline std::array<double, 3> solve_quadratic(const std::vector<double> &c,
     return {a1, a2, a3};
 }
 
-// ==========================================
-// Function: jackknife_sigma
-// Method: Reproduce the weighted leave-one-region-out variance expression.
-// ==========================================
-inline double jackknife_sigma(const std::vector<double> &estimates,
-                              const std::vector<double> &weights,
-                              double full, double ntot) {
-    int used = 0;
-    double exterior = 0;
-    for (std::size_t i = 0; i < weights.size(); ++i) if (weights[i] > 0) {
-        ++used; exterior += (1.0 - weights[i]/ntot) * estimates[i];
-    }
-    if (used < 2) return 0;
-    double sum = 0;
-    for (std::size_t i = 0; i < weights.size(); ++i) if (weights[i] > 0) {
-        const double h = ntot / weights[i];
-        const double t = (h - used)*full - (h - 1)*estimates[i] + exterior;
-        sum += t*t / (h - 1);
-    }
-    return std::sqrt(sum / used);
-}
 } // namespace bcg

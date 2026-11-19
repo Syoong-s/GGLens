@@ -22,7 +22,7 @@ std::vector<double> radial_edges(const Config &cfg) {
 // Method: Restore catalog FD when enabled, fit raw all-R sources, and spool calibrated ESD pairs.
 // ==========================================
 std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
-    const std::vector<bcg::Lens> &lenses, const std::vector<int> &labels,
+    const std::vector<bcg::Lens> &lenses,
     const std::vector<std::string> &files, const bcg::ShearLayout &layout, Config &cfg,
     SelfCalibrationDiagnostics &diagnostics, const bcg::ScratchSpace &scratch, MPI_Comm comm) {
     int rank = 0; MPI_Comm_rank(comm, &rank);
@@ -49,14 +49,14 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
         fitted = bcg::fit_star_bar(bcg::BarRows(bar_file), cfg.cuts, comm, budget);
     }
     const auto metadata = static_cast<std::uint64_t>(cfg.n_r_bins) *
-        (lenses.size() + static_cast<std::uint64_t>(cfg.n_jack) * 8 + 16384) +
+        (lenses.size() + 16384) +
         static_cast<std::uint64_t>(lenses.size()) * 128;
     if (metadata > budget / 8)
         throw std::runtime_error("Selected-lens/bin metadata exceeds run.memory-mb budget");
     std::vector<std::unique_ptr<bcg::PairStore>> bins;
     for (int i = 0; i < cfg.n_r_bins; ++i)
         bins.emplace_back(new bcg::PairStore(scratch.path("pairs_" + std::to_string(i) + ".bin"),
-            budget / 8, budget / 8 / static_cast<std::size_t>(cfg.n_r_bins), lenses.size(), cfg.n_jack));
+            budget / 8, budget / 8 / static_cast<std::size_t>(cfg.n_r_bins), lenses.size(), 1));
     const auto edges = radial_edges(cfg);
     bcg::Cosmology cosmo(cfg.omega_m, cfg.h);
     struct Geometry { double chi = 0, chord = 0; std::array<double, 3> xyz{}; };
@@ -118,7 +118,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
                 const double ut = -(s.h1 * c4 + s.h2 * s4);
                 const double beta = cosmo.beta(lens.z, s.zp, geo.chi, s.chi);
                 bins[bin]->append({gt, gx, beta * (s.de + ut), beta * (s.de - ut),
-                                   static_cast<std::int32_t>(li), 0}, radius, labels[li]);
+                                   static_cast<std::int32_t>(li), 0}, radius);
             }
         }
         if (collect_fd)
@@ -168,7 +168,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     MPI_Allreduce(&local_sources, &total_sources, 1, MPI_INT64_T, MPI_SUM, comm);
     MPI_Allreduce(&local_pairs, &total_pairs, 1, MPI_INT64_T, MPI_SUM, comm);
     if (!rank) std::cout << "Sources after cuts: " << total_sources << '\n'
-                         << "BCG-source pairs: " << total_pairs << std::endl;
+                         << "Lens-source pairs: " << total_pairs << std::endl;
     if (!total_sources) throw std::runtime_error("No sources survive quality cuts");
     if (!total_pairs) throw std::runtime_error("No lens-source pairs");
     return bins;

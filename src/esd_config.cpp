@@ -10,7 +10,7 @@ namespace {
 // Method: Overlay typed INI keys on compiled defaults and report invalid keys at their line.
 // ==========================================
 void apply_ini(Config &c, const std::string &text) {
-    using Setting = std::variant<std::string *, double *, int *, bool *>;
+    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *>;
     const std::unordered_map<std::string, Setting> settings{
         {"run.group-list", &c.group_list},
         {"run.shear-list", &c.shear_list},
@@ -18,6 +18,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"run.cache", &c.cache},
         {"run.scratch-dir", &c.scratch_dir},
         {"run.memory-mb", &c.memory_mib},
+        {"measurement.center", &c.center},
         {"measurement.z-min", &c.zmin},
         {"measurement.z-max", &c.zmax},
         {"measurement.logm-min", &c.mmin},
@@ -27,10 +28,10 @@ void apply_ini(Config &c, const std::string &text) {
         {"measurement.dz-min", &c.dzmin},
         {"measurement.omega-m", &c.omega_m},
         {"measurement.h", &c.h},
-        {"measurement.nfw-c", &c.nfw_c},
-        {"measurement.conc-min", &c.conc_min},
-        {"measurement.conc-max", &c.conc_max},
-        {"measurement.conc-model", &c.conc_model},
+        {"measurement.sigma8", &c.sigma8},
+        {"measurement.omega-b-h2", &c.omega_b_h2},
+        {"measurement.spectral-index", &c.spectral_index},
+        {"measurement.neutrino-mass", &c.neutrino_mass},
         {"measurement.n-r-bins", &c.n_r_bins},
         {"measurement.n-jack", &c.n_jack},
         {"measurement.pdf-bins", &c.pdf_bins},
@@ -70,16 +71,18 @@ void apply_ini(Config &c, const std::string &text) {
         {"cuts.max-dup", &c.cuts.max_dup},
         {"cuts.star-bar-mltp", &c.cuts.star_bar_mltp},
         {"cuts.expo-bar-mltp", &c.cuts.expo_bar_mltp},
-        {"plots.esd-plot", &c.esd_plot},
-        {"plots.fd-plot", &c.fd_plot},
+        {"fit.walkers", &c.fit_walkers},
+        {"fit.steps", &c.fit_steps},
+        {"fit.burn-in", &c.fit_burn},
+        {"fit.ensembles", &c.fit_ensembles},
+        {"fit.seed", &c.fit_seed},
+        {"fit.profile-draws", &c.fit_profile_draws},
+        {"fit.python-path", &c.fit_python_path},
+        {"plots.esd-plot", &c.fit_plot},
         {"plots.title", &c.plot_title},
-        {"plots.x-spread", &c.plot_x_spread},
-        {"plots.linear-width", &c.plot_linear_width},
-        {"plots.ratio-y-min", &c.plot_ratio_min},
-        {"plots.ratio-y-max", &c.plot_ratio_max},
     };
     const std::unordered_set<std::string> sections{
-        "run", "measurement", "calibration", "external_columns", "cuts", "plots"
+        "run", "measurement", "calibration", "external_columns", "cuts", "fit", "plots"
     };
     std::unordered_set<std::string> seen;
     std::istringstream input(text);
@@ -113,6 +116,8 @@ void apply_ini(Config &c, const std::string &text) {
                 std::size_t end = 0;
                 if constexpr (std::is_same_v<T, std::string>) {
                     *dest = value;
+                } else if constexpr (std::is_same_v<T, bcg::Center>) {
+                    *dest = bcg::parse_center(value);
                 } else if constexpr (std::is_same_v<T, bool>) {
                     if (value == "true" || value == "1") *dest = true;
                     else if (value == "false" || value == "0") *dest = false;
@@ -124,8 +129,8 @@ void apply_ini(Config &c, const std::string &text) {
                         throw std::invalid_argument("expected a finite number");
                 }
             }, found->second);
-        } catch (const std::logic_error &) {
-            throw error("Invalid value for " + key + ": " + value);
+        } catch (const std::logic_error &e) {
+            throw error("Invalid value for " + key + ": " + value + " (" + e.what() + ")");
         }
     }
 }
@@ -139,8 +144,10 @@ void validate_config(Config &c) {
     if (c.group_list.empty() || c.shear_list.empty() || c.output.empty())
         throw std::runtime_error("run.group-list, run.shear-list and run.output must be set");
     if (!(c.zmin >= 0 && c.zmax > c.zmin && c.mmax > c.mmin && c.rmin > 0 && c.rmax > c.rmin &&
-          c.dzmin >= 0 && c.omega_m > 0 && c.omega_m < 1 && c.h > 0 && c.nfw_c > 0 &&
-          c.conc_min > 0 && c.conc_max >= c.conc_min && c.n_r_bins > 0 && c.n_jack > 1 && c.pdf_bins > 0))
+          c.dzmin >= 0 && c.omega_m > 0 && c.omega_m < 1 && c.h > 0 && c.sigma8 > 0 &&
+          c.omega_b_h2 > 0 && c.neutrino_mass >= 0 && c.spectral_index > 0 &&
+          c.omega_m*c.h*c.h > c.omega_b_h2 + c.neutrino_mass/93.14 &&
+          c.n_r_bins >= 6 && c.n_jack > 6 && c.pdf_bins > 0))
         throw std::runtime_error("Invalid measurement parameter range");
     const auto &cuts = c.cuts;
     using bcg::cut_enabled;
@@ -161,7 +168,9 @@ void validate_config(Config &c) {
     const auto budget = c.memory_bytes();
     if ((limit_duplicates && static_cast<std::uint64_t>(cuts.max_dup) * sizeof(bcg::ShearRow) > budget / 16) ||
         static_cast<std::uint64_t>(c.pdf_bins + 1LL) * 3200 > budget / 16 ||
-        static_cast<std::uint64_t>(c.n_jack + 1LL) * c.pdf_bins * 64 > budget / 16 ||
+        static_cast<std::uint64_t>(c.n_jack + 1LL) * 2049 * sizeof(std::int64_t) > budget / 4 ||
+        static_cast<std::uint64_t>(c.n_jack + 1LL) * (c.pdf_bins + 1LL) * 4 * 61 * sizeof(std::int64_t)
+            > budget / 4 ||
         static_cast<std::uint64_t>(c.n_r_bins) * 16384 > budget / 8 || c.n_r_bins > 256)
         throw std::runtime_error("Bin/replica/duplicate configuration exceeds memory or open-file budget");
     if (c.self_calibrate) {
@@ -170,30 +179,45 @@ void validate_config(Config &c) {
               c.selfcal_min_count > c.selfcal_pdf_bins && c.selfcal_search_width > 0))
             throw std::runtime_error("Invalid self-calibration FD settings");
     }
+    if (c.fit_walkers < 10 || c.fit_walkers % 2 || c.fit_steps <= c.fit_burn ||
+        c.fit_burn < 0 || c.fit_ensembles < 1 || c.fit_seed < 0)
+        throw std::runtime_error("Invalid MCMC settings: use >=10 even walkers and steps > burn-in");
+    if (c.fit_profile_draws < 1)
+        throw std::runtime_error("fit.profile-draws must be positive");
+    const auto chain_values = static_cast<long double>(c.fit_walkers) *
+                              (c.fit_steps - c.fit_burn) * c.fit_ensembles * 6;
+    if (chain_values > std::numeric_limits<int>::max())
+        throw std::runtime_error("MCMC chain exceeds MPI count limits");
     const auto path = bcg::fs::path(c.output);
-    if (c.esd_plot.empty()) c.esd_plot = (path.parent_path() / (path.stem().string() + ".png")).string();
-    if (c.self_calibrate && c.fd_plot.empty())
-        c.fd_plot = (path.parent_path() / (path.stem().string() + "_FD.png")).string();
-    const auto check_plot_path = [](const std::string &plot) {
-        if (bcg::fs::path(plot).extension() != ".png")
-            throw std::runtime_error("Plot output must end in .png: " + plot);
-    };
-    check_plot_path(c.esd_plot);
-    if (c.self_calibrate) check_plot_path(c.fd_plot);
+    const auto base = (path.parent_path() / path.stem()).string();
+    c.covariance_output = base + "_cov.dat";
+    c.replica_output = base + "_jackknife.dat";
+    c.summary_output = base + "_fit.json";
+    c.chain_output = base + "_chain.npz";
+    c.profile_output = base + "_profiles.dat";
+    c.profile_draws_output = base + "_profile_draws.npz";
+    if (!c.cache.empty() && c.center != bcg::Center::bcg) {
+        const bcg::fs::path cache(c.cache);
+        c.cache = (cache.parent_path() / (cache.stem().string() + "_" +
+                   bcg::center_name(c.center) + cache.extension().string())).string();
+    }
+    if (c.plot_title.empty()) {
+        std::string label = bcg::center_name(c.center);
+        for (char &letter : label) letter = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
+        c.plot_title = label + "-centered group lensing";
+    }
+    if (c.fit_plot.empty()) c.fit_plot = base + "_fit.png";
+    if (bcg::fs::path(c.fit_plot).extension() != ".png")
+        throw std::runtime_error("Plot output must end in .png: " + c.fit_plot);
     std::unordered_set<std::string> outputs;
-    for (const auto &output : {c.output, c.cache, c.esd_plot, c.self_calibrate ? c.fd_plot : ""}) {
+    for (const auto &output : {c.output, c.cache, c.fit_plot, c.covariance_output,
+                               c.replica_output, c.summary_output, c.chain_output,
+                               c.profile_output, c.profile_draws_output}) {
         if (!output.empty() && !outputs.insert(bcg::fs::weakly_canonical(
                 bcg::fs::absolute(output)).string()).second)
             throw std::runtime_error("Each output must have a distinct path: " + output);
     }
-    if (!(c.plot_x_spread >= 0 && c.plot_linear_width > 0 &&
-          ((c.plot_ratio_min == 0 && c.plot_ratio_max == 0) || c.plot_ratio_min < c.plot_ratio_max)))
-        throw std::runtime_error("Invalid plot scale or ratio limits");
     if (c.scratch_dir.empty()) c.scratch_dir = (bcg::fs::absolute(c.output).parent_path() / ".bcg_scratch").string();
-    const std::vector<std::string> models = {"fixed", "duffy08_200m", "duffy08_200c",
-                                             "duffy08_vir", "dutton14_200c"};
-    if (std::find(models.begin(), models.end(), c.conc_model) == models.end())
-        throw std::runtime_error("Unknown concentration model: " + c.conc_model);
 }
 } // namespace
 

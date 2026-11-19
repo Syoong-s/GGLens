@@ -55,12 +55,12 @@ def parse_args():
 
 # ==========================================
 # Function: load_esd
-# Method: Validate eleven-column tables while preserving every original row.
+# Method: Validate current and historical ESD tables while preserving every original row.
 # ==========================================
 def load_esd(path):
     table = np.loadtxt(path, comments="#", ndmin=2)
-    if table.size == 0 or table.shape[1] != 11:
-        raise ValueError(f"{path}: expected a nonempty 11-column ESD table")
+    if table.size == 0 or table.shape[1] not in (8, 11):
+        raise ValueError(f"{path}: expected a nonempty 8- or 11-column ESD table")
     return table
 
 

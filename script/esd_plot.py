@@ -1,4 +1,4 @@
-"""Render ESD and Cartesian FD results passed in memory by the C++ program."""
+"""Plotting utilities for the fitted ESD and optional table comparison."""
 
 import os
 from pathlib import Path
@@ -90,101 +90,53 @@ def save_figure(fig, output, dpi):
 
 
 # ==========================================
-# Function: render_esd
-# Method: Plot measured and NFW ESD, the cross component, and the tangential ratio.
+# Function: render_fit
+# Method: Draw the saved total best-fit curve and posterior bands against the measured ESD.
 # ==========================================
-def render_esd(rows, output, title, x_spread, linear_width, limits):
-    from matplotlib import pyplot as plt
-
-    radius, measured, sigma, cross, cross_sigma, theory, ratio = np.asarray(rows).T
-    valid = np.isfinite(radius) & (radius > 0) & np.isfinite(measured)
-    valid_theory = valid & np.isfinite(theory)
-    valid_cross = valid & np.isfinite(cross)
-    ratio_valid = valid_theory & np.isfinite(ratio) & (theory != 0)
-    # Shift the plotted components symmetrically on the logarithmic R axis.
-    # Keep theory, ratio-panel radii and all measured values unmodified.
-    tangential_radius = display_radius(radius, 0, 2, x_spread)
-    cross_radius = display_radius(radius, 1, 2, x_spread)
-    cross_order = np.flatnonzero(valid_cross)
-    cross_order = cross_order[np.argsort(radius[cross_order], kind="stable")]
-
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    ax = axes[0]
-    ax.errorbar(tangential_radius[valid], measured[valid],
-                yerr=np.where(np.isfinite(sigma[valid]) & (sigma[valid] >= 0), sigma[valid], 0),
-                fmt="o", color="tab:red", capsize=3, zorder=3,
-                label="Tangential PDF_SYM")
-    ax.errorbar(cross_radius[cross_order], cross[cross_order],
-                yerr=np.where(np.isfinite(cross_sigma[cross_order]) & (cross_sigma[cross_order] >= 0),
-                              cross_sigma[cross_order], 0),
-                fmt="s--", color="tab:blue", capsize=2,
-                alpha=0.4, linewidth=1, zorder=1, label="Cross component")
-    ax.plot(radius[valid_theory], theory[valid_theory], "k--", label="NFW reference")
-    ax.axhline(0, color="0.5", linewidth=0.7)
-    ax.set_xscale("log")
-    ax.set_yscale("symlog", linthresh=1)
-    ax.set_xlabel(r"$R\ [h^{-1}\,\mathrm{Mpc}]$")
-    ax.set_ylabel(r"$\Delta\Sigma\ [h\,M_\odot/\mathrm{pc}^2]$")
-    ax.set_title("ESD and cross component")
-    ax.grid(True, alpha=0.25)
-    ax.legend()
-
-    ax = axes[1]
-    ax.errorbar(radius[ratio_valid], ratio[ratio_valid],
-                yerr=np.where(np.isfinite(sigma[ratio_valid]) & (sigma[ratio_valid] >= 0),
-                              sigma[ratio_valid] / np.abs(theory[ratio_valid]), 0),
-                fmt="o", color="tab:red", capsize=3)
-    ax.axhline(1, color="k", linestyle="--", linewidth=0.8)
-    ax.set_xscale("log")
-    configure_ratio_axis(ax, linear_width, limits)
-    ax.set_xlabel(r"$R\ [h^{-1}\,\mathrm{Mpc}]$")
-    ax.set_ylabel("Measured / NFW")
-    ax.set_title("Tangential ratio")
-    ax.grid(True, alpha=0.25)
-
-    fig.suptitle(title)
-    save_figure(fig, output, 250)
-
-
-# ==========================================
-# Function: render_fd
-# Method: Plot both Cartesian components against FD with fitted gains and offsets.
-# ==========================================
-def render_fd(output, selected, limit, components):
-    from matplotlib import pyplot as plt
-
-    fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
-    x = np.linspace(-limit, limit, 200)
-    for component, (ax, fit) in enumerate(zip(axes, components), 1):
-        m, c, sigma_m, sigma_c, n_fit, rows = fit
-        points = np.asarray(rows, dtype=float)
-        valid = ((points[:, 0] > 0) & (points[:, 4] == 0)
-                 & np.all(np.isfinite(points), axis=1) & (points[:, 3] > 0))
-        ax.errorbar(points[valid, 1], points[valid, 2], yerr=points[valid, 3],
-                    fmt="o", markersize=4, capsize=2, label="All-R unique sources")
-        ax.plot(x, x, ":", color="black", label="Ideal")
-        ax.plot(x, (1 + m) * x + c, color="tab:red", label="Weighted fit")
-        ax.set_xlabel(rf"$g_{{f,{component}}}$")
-        ax.set_ylabel(rf"$\hat g_{{{component}}}$")
-        ax.set_title(f"Cartesian component {component}")
-        text = (f"m{component} = {m:.5g} ± {sigma_m:.3g}\n"
-                f"c{component} = {c:.5g} ± {sigma_c:.3g}\n"
-                f"Valid FD bins: {n_fit}/{len(points)}")
-        ax.text(0.03, 0.97, text, transform=ax.transAxes, va="top", fontsize=9)
-        ax.grid(alpha=0.25)
-        ax.legend(loc="lower right", fontsize=8)
-    fig.suptitle(f"All-R source self-calibration — {selected:,} unique measurement rows")
-    save_figure(fig, output, 160)
-
-
-# ==========================================
-# Function: render_plots
-# Method: Use the noninteractive backend for the single end-of-run plotting call.
-# ==========================================
-def render_plots(rows, output, title, x_spread, linear_width, limits, fd):
+def render_fit(radius, measured, covariance, profiles, chi2, dof, path, title):
     import matplotlib
-
     matplotlib.use("Agg")
-    render_esd(rows, output, title, x_spread, linear_width, limits)
-    if fd is not None:
-        render_fd(*fd)
+    from matplotlib import pyplot as plt
+
+    r = profiles.radius
+    best = profiles.best[:, -1]
+    p025, p16, _, p84, p975 = profiles.quantiles[:, :, -1]
+    fig, ax = plt.subplots(figsize=(7.4, 5.1))
+    ax.fill_between(r, p025, p975, color="#c9ddf1", label="95% posterior")
+    ax.fill_between(r, p16, p84, color="#83b0dc", label="68% posterior")
+    ax.plot(r, best, color="#123b65", linewidth=2, label="Best-fit model")
+    ax.errorbar(radius, measured, yerr=np.sqrt(np.diag(covariance)),
+                color="#252525", fmt="o", ms=4, capsize=2, zorder=3, label="Tangential ESD")
+    ax.axhline(0, color="0.62", linewidth=0.8)
+    ax.set(xscale="log", yscale="symlog", xlabel=r"$R\ [h^{-1}\,\mathrm{Mpc}]$",
+           ylabel=r"$\Delta\Sigma\ [h\,M_\odot/\mathrm{pc}^2]$", title=title)
+    ax.text(0.03, 0.06, rf"$\chi^2/\nu={chi2:.2f}/{dof}$", transform=ax.transAxes)
+    ax.legend(frameon=False)
+    save_figure(fig, path, 220)
+
+
+# ==========================================
+# Function: render_saved_fit
+# Method: Reproduce the fit plot from one result prefix and its saved plot data.
+# ==========================================
+def render_saved_fit(prefix, path):
+    import json
+    from esd_profiles import read_profiles
+
+    summary = json.loads(Path(f"{prefix}_fit.json").read_text())
+    fit_id = summary["fit_id"]
+    profiles = read_profiles(f"{prefix}_profiles.dat", fit_id)
+    with np.load(f"{prefix}_chain.npz", allow_pickle=False) as chain:
+        if "fit_id" not in chain or chain["fit_id"].item() != fit_id:
+            raise ValueError("Fit summary and chain have different fit IDs")
+        if chain["center"].item() != summary["center"]:
+            raise ValueError("Fit summary and chain have different lens centers")
+        obs = chain["radii"]
+        if not np.array_equal(obs, np.asarray(summary["fitted_profile"]["R_Mpc_over_h"])):
+            raise ValueError("Fit summary and chain have different measured radii")
+        keep = np.searchsorted(profiles.radius, obs)
+        if (np.any(keep >= len(profiles.radius)) or not np.array_equal(profiles.radius[keep], obs)
+                or not np.array_equal(profiles.best[keep, -1], summary["fitted_profile"]["total"])):
+            raise ValueError("Fit summary and plotted best-fit values disagree")
+        render_fit(obs, chain["measured"], chain["covariance"], profiles, summary["chi2"],
+                   summary["degrees_of_freedom"], path, summary["plot_title"])

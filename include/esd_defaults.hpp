@@ -1,5 +1,6 @@
 #pragma once
 #include "bcg_calibration.hpp"
+#include "bcg_dr9.hpp"
 #include "bcg_shear_cuts.hpp"
 
 namespace bcg_esd::defaults {
@@ -14,12 +15,12 @@ inline constexpr char scratch_dir[] = "";
 inline constexpr int memory_mib = 512;
 
 // Lens sample, radial bins, cosmology, and PDF_SYM
+inline constexpr bcg::Center center = bcg::Center::bcg;
 inline constexpr double zmin = 0.3, zmax = 0.4, mmin = 13.0, mmax = 14.2;
 inline constexpr double rmin = 0.1, rmax = 5.0, dzmin = 0.2;
-inline constexpr double omega_m = 0.315, h = 0.674, nfw_c = 7.44;
-inline constexpr double conc_min = 1.0, conc_max = 40.0;
-inline constexpr char conc_model[] = "duffy08_200m";
-inline constexpr int n_r_bins = 10, n_jack = 100, pdf_bins = 4;
+inline constexpr double omega_m = 0.315, h = 0.674, sigma8 = 0.811;
+inline constexpr double omega_b_h2 = 0.02237, spectral_index = 0.965, neutrino_mass = 0.06;
+inline constexpr int n_r_bins = 10, n_jack = 400, pdf_bins = 4;
 
 // FD restoration and Cartesian calibration
 inline constexpr bool fd_corrected = false, self_calibrate = false;
@@ -29,11 +30,13 @@ inline constexpr double gf_lim = -9999.0;
 inline constexpr double selfcal_fd_limit = 0.0015; // When the source FD cut is disabled.
 inline constexpr bcg::ShearCalibration calibration{0.0, 0.0, 0.0, 0.0}; // m1, m2, c1, c2
 
-// Plot paths default to the result stem plus .png and _FD.png.
-inline constexpr char esd_plot[] = "", fd_plot[] = "";
-inline constexpr char plot_title[] = "BCG-centered group lensing";
-inline constexpr double plot_x_spread = 0.06, plot_linear_width = 0.1;
-inline constexpr double plot_ratio_min = 0, plot_ratio_max = 0; // Both zero: automatic.
+// Independent emcee ensembles, with steps counted per walker.
+inline constexpr int fit_walkers = 72, fit_steps = 10000, fit_burn = 1000;
+inline constexpr int fit_ensembles = 4, fit_seed = 12771;
+inline constexpr int fit_profile_draws = 4096;
+inline constexpr char fit_python_path[] = "";
+inline constexpr char fit_plot[] = "";
+inline constexpr char plot_title[] = ""; // Derived from the center when empty.
 
 // Positions are one-based. CatalogCombiner appends the exposure chi2.
 inline constexpr auto external_columns = [] {

@@ -1,15 +1,17 @@
-#include "esd_plot.hpp"
+#include "bcg_esd.hpp"
+#include "selfcalibration.hpp"
 #include <iostream>
 
 namespace {
 // ==========================================
 // Function: run
-// Method: Broadcast the input schema, measure ESD, and render the outputs from rank-zero results.
+// Method: Run DR9 matching, source pairing, jackknife measurement, MCMC, and the final figure.
 // ==========================================
 void run(bcg_esd::Config &cfg, MPI_Comm comm) {
     int rank = 0, size = 1;
     MPI_Comm_rank(comm, &rank); MPI_Comm_size(comm, &size);
     if (!rank) {
+        std::cout << "Lens center: " << bcg::center_name(cfg.center) << std::endl;
         if (cfg.self_calibrate) std::cout << "Self-calibration enabled: Cartesian all-R union; manual m/c will be overridden" << std::endl;
         else std::cout << "Shear calibration: " << cfg.calibration.description() << std::endl;
     }
@@ -23,32 +25,31 @@ void run(bcg_esd::Config &cfg, MPI_Comm comm) {
                          << ", buffer budget per rank: " << cfg.memory_mib << " MiB\n"
                          << "Scratch root: " << cfg.scratch_dir << std::endl;
     const auto lenses = bcg_esd::load_lenses(cfg, comm);
-    const auto labels = bcg_esd::initial_regions(lenses, cfg.n_jack, comm);
     bcg::ScratchSpace scratch(cfg.scratch_dir, comm);
     bcg_esd::SelfCalibrationDiagnostics diagnostics;
-    auto bins = bcg_esd::build_pair_spools(lenses, labels, files, layout, cfg, diagnostics, scratch, comm);
+    auto bins = bcg_esd::build_pair_spools(lenses, files, layout, cfg, diagnostics, scratch, comm);
+    const auto stack = bcg_esd::make_lens_stack(lenses, bins, cfg, comm);
     const auto edges = bcg_esd::radial_edges(cfg);
     std::vector<bcg_esd::Result> results; results.reserve(cfg.n_r_bins);
     for (int i = 0; i < cfg.n_r_bins; ++i) {
         if (!rank) std::cout << "Measuring bin " << i + 1 << '/' << cfg.n_r_bins
                              << " R=[" << edges[i] << ',' << edges[i + 1] << ")" << std::endl;
-        const auto result = bcg_esd::measure_bin(*bins[i], edges[i], edges[i + 1],
-                                                lenses, labels, cfg, scratch, comm);
+        auto result = bcg_esd::measure_bin(*bins[i], edges[i], edges[i + 1], stack, cfg, comm);
         bins[i]->release(); bins[i].reset();
         if (!rank) {
-            results.push_back(result);
             std::cout << "bin " << i + 1 << '/' << cfg.n_r_bins << " pairs=" << result.count
                       << " R_eff=" << result.effective << " ESD=" << result.measured << std::endl;
         }
+        results.push_back(std::move(result));
     }
     scratch.cleanup(comm);
+    const auto covariance = bcg_esd::jackknife_covariance(results, stack.regions);
     if (!rank) {
-        bcg_esd::write_results(results, cfg);
-        std::cout << "Saved: " << cfg.output << std::endl;
-        bcg_esd::render_plots(results, cfg, diagnostics);
-        std::cout << "ESD plot: " << cfg.esd_plot << std::endl;
-        if (cfg.self_calibrate) std::cout << "FD plot: " << cfg.fd_plot << std::endl;
+        bcg_esd::write_results(results, covariance, stack, cfg);
+        std::cout << "Saved ESD and jackknife covariance: " << cfg.output << std::endl;
     }
+    bcg_esd::fit_esd(results, covariance, stack, cfg, comm);
+    if (!rank) std::cout << "Fit figure: " << cfg.fit_plot << std::endl;
 }
 } // namespace
 

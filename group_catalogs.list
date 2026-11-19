@@ -1,9 +1,9 @@
 # group_cat galaxy_cat member_cat
 1
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/DESI_NGCP_group
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/DESI_NGC_galaxy
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/iDESI_NGCP_1
+catalogs/DESIDR9_NGC_group
+catalogs/DESIDR9_galaxy
+catalogs/iDESIDR9_NGC_1
 2
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/DESI_SGCP_group
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/DESI_SGC_galaxy
-/lustre/home/acct-phyzj/share/DES/testy/ls8_groups_cat/iDESI_SGCP_1
+catalogs/DESIDR9_SGC_group
+catalogs/DESIDR9_galaxy
+catalogs/iDESIDR9_SGC_1
