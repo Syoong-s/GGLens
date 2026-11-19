@@ -6,10 +6,10 @@ struct Cuts;
 
 // ==========================================
 // Structure: ExternalColumns
-// Method: Store the positions of fields supplied outside shear.dat.
+// Method: Store the configured positions of catalog metadata.
 // ==========================================
 struct ExternalColumns {
-    int ra, dec, zp, mag, ext_mash, expo_num, expo_chi2;
+    int ra, dec, zp, mag, ext_mash, expo_num, ccd_num, expo_chi2;
 };
 
 // ==========================================
@@ -18,7 +18,7 @@ struct ExternalColumns {
 // ==========================================
 struct ShearRow {
     enum Field {
-        ra, dec, zp, mag, ext_mash, expo_num, chi2,
+        ra, dec, zp, mag, ext_mash, expo_num, ccd_num, chi2,
         g1, g2, de, h1, h2, gf1, gf2,
         snr_f, half_light_flux, half_light_area, psf_fwhm,
         nstar, poly_chi2, flag, sigma, imax, jmax, count

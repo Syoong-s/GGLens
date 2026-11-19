@@ -1,0 +1,14 @@
+# Include only the build inputs and license in source archives.
+* export-ignore
+/LICENSE -export-ignore
+/Makefile -export-ignore
+/include -export-ignore
+/include/*.hpp -export-ignore
+/src -export-ignore
+/src/*.cpp -export-ignore
+/script -export-ignore
+/script/esd_nfw.py -export-ignore
+/script/esd_two_halo.py -export-ignore
+/script/esd_profiles.py -export-ignore
+/script/esd_plot.py -export-ignore
+/script/esd_fit.py -export-ignore

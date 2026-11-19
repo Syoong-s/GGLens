@@ -48,6 +48,7 @@ ShearLayout detect_shear_layout(const std::string &path, const ExternalColumns &
     set_external(external.mag, Field::mag, "mag", cuts.needs_magnitude());
     set_external(external.ext_mash, Field::ext_mash, "ext-mash", cut_enabled(cuts.ext_cut));
     set_external(external.expo_num, Field::expo_num, "expo-num", cuts.exposure_bar_enabled());
+    set_external(external.ccd_num, Field::ccd_num, "ccd-num", cuts.ccd_cut_enabled());
     const int chi2_column = external.expo_chi2 == -1 ? width : external.expo_chi2;
     set_external(chi2_column, Field::chi2, "expo-chi2", cut_enabled(cuts.chi2_thresh));
 

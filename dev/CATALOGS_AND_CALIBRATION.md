@@ -20,7 +20,11 @@ Rank 0 uses the first shear file's first line for the column count and mapping. 
 
 Each source file is assigned by list position modulo the number of source workers. Rank 0 joins the source read for a single-rank run. The duplicate cut compares consecutive RA and Dec against the start of their current group to a tolerance of `1e-7` degree. Groups over the limit are dropped before per-row cuts. Duplicate grouping ends at each file boundary.
 
-All optional cuts use `threshold >= -999.0` as the enable condition. Map each new named field in the first-header reader and tie its read dependency to the same cut predicate used by the row selector. The source quantities defined by the selector are
+Scalar cuts use `threshold >= -999.0` as the enable condition. Map each new named field in the first-header reader and tie its read dependency to the same cut predicate used by the row selector.
+
+The CCD cut uses a sorted, deduplicated vector of IDs. An active list requires the configured one-based CCD column. The selector rounds that value to the nearest integer, with ties away from zero as in Fortran's `NINT`, and drops listed IDs before star-bar fitting and pair collection. The same selected rows feed both the FD calibration and the ESD measurement. Set `excluded_ccds` and `external_columns.ccd_num` to change the compiled defaults. [Defaults](../include/esd_defaults.hpp)
+
+The source quantities defined by the selector are
 
 $$
 \mathrm{SNR}=\frac{\mathrm{half\_light\_flux}}{\sqrt{A}},\qquad

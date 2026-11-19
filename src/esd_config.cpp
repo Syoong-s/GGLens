@@ -6,11 +6,38 @@
 namespace bcg_esd {
 namespace {
 // ==========================================
+// Function: parse_ccd_cut
+// Method: Read a comma-separated list of CCD IDs or the common disabled value.
+// ==========================================
+std::vector<int> parse_ccd_cut(const std::string &input) {
+    const std::string value = bcg::trim(input);
+    if (value.empty()) return {};
+    if (value.front() == '-' && value.find(',') == std::string::npos) {
+        std::size_t end = 0;
+        const double threshold = std::stod(value, &end);
+        if (end == value.size() && std::isfinite(threshold) && !bcg::cut_enabled(threshold)) return {};
+    }
+
+    if (value.back() == ',') throw std::invalid_argument("expected a CCD ID after the last comma");
+    std::vector<int> ids;
+    std::istringstream entries(value);
+    for (std::string token; std::getline(entries, token, ',');) {
+        token = bcg::trim(token);
+        std::size_t end = 0;
+        const int id = std::stoi(token, &end);
+        if (end != token.size() || id < 0)
+            throw std::invalid_argument("expected nonnegative integer CCD IDs separated by commas");
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+// ==========================================
 // Function: apply_ini
 // Method: Overlay typed INI keys on compiled defaults and report invalid keys at their line.
 // ==========================================
 void apply_ini(Config &c, const std::string &text) {
-    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *>;
+    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *, std::vector<int> *>;
     const std::unordered_map<std::string, Setting> settings{
         {"run.group-list", &c.group_list},
         {"run.shear-list", &c.shear_list},
@@ -52,6 +79,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"external_columns.mag", &c.external_columns.mag},
         {"external_columns.ext-mash", &c.external_columns.ext_mash},
         {"external_columns.expo-num", &c.external_columns.expo_num},
+        {"external_columns.ccd-num", &c.external_columns.ccd_num},
         {"external_columns.expo-chi2", &c.external_columns.expo_chi2},
         {"cuts.snrfcut", &c.cuts.snrfcut},
         {"cuts.snrlow", &c.cuts.snrlow},
@@ -71,6 +99,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"cuts.max-dup", &c.cuts.max_dup},
         {"cuts.star-bar-mltp", &c.cuts.star_bar_mltp},
         {"cuts.expo-bar-mltp", &c.cuts.expo_bar_mltp},
+        {"cuts.ccd-cut", &c.cuts.excluded_ccds},
         {"fit.walkers", &c.fit_walkers},
         {"fit.steps", &c.fit_steps},
         {"fit.burn-in", &c.fit_burn},
@@ -116,6 +145,8 @@ void apply_ini(Config &c, const std::string &text) {
                 std::size_t end = 0;
                 if constexpr (std::is_same_v<T, std::string>) {
                     *dest = value;
+                } else if constexpr (std::is_same_v<T, std::vector<int>>) {
+                    *dest = parse_ccd_cut(value);
                 } else if constexpr (std::is_same_v<T, bcg::Center>) {
                     *dest = bcg::parse_center(value);
                 } else if constexpr (std::is_same_v<T, bool>) {
@@ -149,6 +180,11 @@ void validate_config(Config &c) {
           c.omega_m*c.h*c.h > c.omega_b_h2 + c.neutrino_mass/93.14 &&
           c.n_r_bins >= 6 && c.n_jack > 6 && c.pdf_bins > 0))
         throw std::runtime_error("Invalid measurement parameter range");
+    auto &excluded_ccds = c.cuts.excluded_ccds;
+    std::sort(excluded_ccds.begin(), excluded_ccds.end());
+    excluded_ccds.erase(std::unique(excluded_ccds.begin(), excluded_ccds.end()), excluded_ccds.end());
+    if (!excluded_ccds.empty() && excluded_ccds.front() < 0)
+        throw std::runtime_error("cuts.ccd-cut requires nonnegative CCD IDs");
     const auto &cuts = c.cuts;
     using bcg::cut_enabled;
     const bool limit_duplicates = cut_enabled(cuts.max_dup);
@@ -223,19 +259,18 @@ void validate_config(Config &c) {
 
 // ==========================================
 // Function: load_config
-// Method: Read the optional override on rank zero and apply the same text on every rank.
+// Method: Read the supplied INI or the default file on rank zero and broadcast its text.
 // ==========================================
-Config load_config(MPI_Comm comm) {
+Config load_config(const char *ini_path, MPI_Comm comm) {
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
     std::string text;
     if (rank == 0) {
-        const char *selected = std::getenv(defaults::ini_environment);
-        const bool explicit_path = selected && *selected;
-        const std::string path = explicit_path ? selected : defaults::ini_name;
+        const bool explicit_path = ini_path != nullptr;
+        const std::string path = explicit_path ? ini_path : defaults::ini_name;
         if (explicit_path || bcg::fs::exists(path)) {
             if (!bcg::fs::is_regular_file(path))
-                throw std::runtime_error("INI is not a regular file: " + path);
+                throw std::runtime_error("INI is not a regular file: '" + path + "'");
             std::ifstream in(path);
             if (!in) throw std::runtime_error("Cannot open INI: " + path);
             std::ostringstream contents;

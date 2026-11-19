@@ -7,10 +7,11 @@ The executable measures one group sample around one selected center and then fit
 | [Catalogs and calibration](CATALOGS_AND_CALIBRATION.md) | DR9 joins, centroid definitions, shear-column resolution, source selection, and field distortion |
 | [ESD and covariance](MEASUREMENT.md) | Pair geometry, response conventions, PDF_SYM, sky regions, and radial covariance |
 | [Model, sampling, and products](FITTING_AND_OUTPUTS.md) | Halo terms, power spectrum, likelihood, posterior draws, and figure generation |
+| [Publishing releases](RELEASING.md) | Source archive contents and version tags |
 
 ## Execution order
 
-1. Rank 0 reads the INI text and broadcasts it. All ranks apply it to the compiled defaults and validate the result. Rank 0 reads the shear list and resolves the source fields from the first header.
+1. Rank 0 reads the INI selected by the optional positional argument, or looks for `esd.ini` in the launch directory. It broadcasts the INI text. All ranks apply it to the compiled defaults and validate the result. Rank 0 reads the shear list and resolves the source fields from the first header.
 2. Resolve the selected DR9 lens centers or restore a matching lens cache. Every rank receives the same ordered lens table.
 3. Source workers apply catalog and calibration selections. They write pair records by radial bin. The participating lenses set the sky regions and the fixed fit inputs.
 4. Measure full-sample and deleted-region ESD profiles. Rank 0 writes these results and their covariance before sampling starts.
@@ -38,7 +39,7 @@ The cluster smoke tests built with GCC 12.3.0 and Open MPI 4.1.6. The runtime wa
 
 ```sh
 make -j 4 PYTHON_CONFIG="$(command -v python3-config)" CPPFLAGS=-DOMPI_SKIP_MPICXX
-mpirun -np "$SLURM_NTASKS" -x LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6" ./esd_bcg_mpi
+mpirun -np "$SLURM_NTASKS" -x LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6" ./esd_bcg_mpi "/path/to/esd.ini"
 ```
 
 Apply the preload to a mixed environment that needs it. Choose `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `MKL_NUM_THREADS=1` for MPI tasks allocated one CPU each.

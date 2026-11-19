@@ -18,7 +18,7 @@ catalogs/DESIDR9_galaxy
 catalogs/iDESIDR9_SGC_1
 ```
 
-Keep the original DR9 column order. The tables below list the columns required by the program. Group IDs are local to a block. Galaxy ID `0` is valid.
+The program accept input in DR9 format (See [DR9 Format](dr9.md)). The tables below list the columns required by the program. Group IDs are local to a block. Galaxy ID `0` is valid.
 
 | Catalog | Column, starting at 1 | Required value |
 | --- | ---: | --- |
@@ -41,19 +41,27 @@ Keep all member rows for LWC and NWC. For BCG, each selected group needs exactly
 
 ## Shear catalogs
 
-The shear list contains one catalog path per line. Relative paths are resolved from the list's directory. Blank lines and lines beginning with `#` can be used in the list.
+The shear list contains each single shear catalog path per line. Relative paths are resolved from the list's directory. Blank lines and lines beginning with `#` can be used in the list.
 
 ```text
 shear/tile_001.cat
 shear/tile_002.cat
 ```
 
-Each catalog starts with a single whitespace-separated header, optionally beginning with `#`. Give all catalogs in a run the same columns in the same order. The required named shear columns are **`g1`, `g2`, `de`, `h1`, `h2`, `gf1`, and `gf2`**. Names are case-insensitive. If an imported column repeats a shear name, put the intended shear column later in the header.
-
-Set `ra`, `dec`, and `zp` under `[external_columns]` to the **one-based** positions of right ascension, declination, and source photometric redshift. Coordinates use degrees, with RA in `[0, 360)` and Dec in `[-90, 90]`. Use source photo-z values up to `5`. If the files contain larger values, set `zphigh = 5` under `[cuts]` to keep rows below `5`. The example below uses positions `1`, `2`, and `3`.
+Each catalog starts with a single whitespace-separated header, optionally beginning with `#`. Use the same column order for every shear file in a run. A standard single shear catalog contains one row per source with the following columns.
 
 ```text
-# ra dec zphot g1 g2 de h1 h2 gf1 gf2
+# (External catalog fields) EXPO_NUM ccD_NUM poly_chi2 xc yc sigma nstar imax jmax half_light_flux half_light_area flag psf_FWHM SNR_F ra dec gf1 gf2 g1 g2 de h1 h2 cos2 sin2 parity Chi2
 ```
 
-Add the columns needed by any optional cuts you enable. Some use named columns, while magnitude, morphology, exposure ID, and exposure quality use column positions. [Source-cut columns](CONFIGURATION.md#source-cuts)
+The required named shear columns for every run are **`g1`, `g2`, `de`, `h1`, `h2`, `gf1`, and `gf2`**. The default cuts also require `half_light_flux`, `half_light_area`, `nstar`, `imax`, and `jmax`, plus the configured magnitude and exposure quality columns.
+
+Names are case-insensitive. If an imported column repeats a shear name, put the intended shear column later in the header.
+
+Use degrees for RA and Dec, with RA in `[0, 360)` and Dec in `[-90, 90]`. The default photo-z cuts keep `0 < zp < 5`. For the header below, set `ra = 1`, `dec = 2`, `zp = 3`, `mag = 4`, and `expo-chi2 = -1` under `[external_columns]`. These are one-based positions, with `-1` selecting the last column for exposure quality.
+
+```text
+# ra dec zphot mag g1 g2 de h1 h2 gf1 gf2 half_light_flux half_light_area nstar imax jmax expo_chi2
+```
+
+Add the columns needed by any optional cuts you enable. Some use named columns, while magnitude, morphology, exposure ID, CCD ID, and exposure quality use column positions. [Source-cut columns](CONFIGURATION.md#source-cuts)

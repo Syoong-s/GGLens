@@ -10,3 +10,7 @@ A run saves the measured ESD and its uncertainties, the best-fit profile, the ra
 | [Input catalogs](doc/INPUTS.md) | DR9 catalog lists and the required shear columns |
 | [Configuration](doc/CONFIGURATION.md) | Center choice, sample limits, and optional settings |
 | [Results](doc/RESULTS.md) | Output filenames, units, and table columns |
+
+Download `FQ_GGLens-v<version>.tar.gz` from GitHub Releases. Open the matching tag for these guides and the example INI. [Example configuration](esd.example.ini)
+
+FQ GGLens is distributed under the [MIT License](LICENSE).

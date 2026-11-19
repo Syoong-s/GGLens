@@ -1,0 +1,16 @@
+# Build and package artifacts
+/build/
+/esd_bcg_mpi
+/FQ_GGLens-v*.tar.gz
+__pycache__/
+*.py[cod]
+
+# Local run settings and default outputs
+/catalogs/
+/shear/
+/esd.ini
+/shear_catalogs.list
+/.bcg_scratch/
+/lens_cache.dat
+/ESD_results.dat
+/ESD_results_*

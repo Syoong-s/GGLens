@@ -2,13 +2,13 @@
 #include "bcg_calibration.hpp"
 #include "bcg_dr9.hpp"
 #include "bcg_shear_cuts.hpp"
+#include <initializer_list>
 
 namespace bcg_esd::defaults {
 // INI discovery and paths
 inline constexpr char ini_name[] = "esd.ini";
-inline constexpr char ini_environment[] = "FQ_GGLENS_INI";
-inline constexpr char group_list[] = "";
-inline constexpr char shear_list[] = "";
+inline constexpr char group_list[] = "group_catalogs.list";
+inline constexpr char shear_list[] = "shear_catalogs.list";
 inline constexpr char output[] = "ESD_results.dat";
 inline constexpr char cache[] = "";
 inline constexpr char scratch_dir[] = "";
@@ -17,16 +17,16 @@ inline constexpr int memory_mib = 512;
 // Lens sample, radial bins, cosmology, and PDF_SYM
 inline constexpr bcg::Center center = bcg::Center::bcg;
 inline constexpr double zmin = 0.3, zmax = 0.4, mmin = 13.0, mmax = 14.2;
-inline constexpr double rmin = 0.1, rmax = 5.0, dzmin = 0.2;
+inline constexpr double rmin = 0.1, rmax = 100.0, dzmin = 0.2;
 inline constexpr double omega_m = 0.315, h = 0.674, sigma8 = 0.811;
 inline constexpr double omega_b_h2 = 0.02237, spectral_index = 0.965, neutrino_mass = 0.06;
-inline constexpr int n_r_bins = 10, n_jack = 400, pdf_bins = 4;
+inline constexpr int n_r_bins = 12, n_jack = 400, pdf_bins = 4;
 
 // FD restoration and Cartesian calibration
-inline constexpr bool fd_corrected = false, self_calibrate = false;
+inline constexpr bool fd_corrected = false, self_calibrate = true;
 inline constexpr int selfcal_fd_bins = 21, selfcal_pdf_bins = 4, selfcal_min_count = 6;
 inline constexpr double selfcal_search_width = 0.2;
-inline constexpr double gf_lim = -9999.0;
+inline constexpr double gf_lim = 0.0015;
 inline constexpr double selfcal_fd_limit = 0.0015; // When the source FD cut is disabled.
 inline constexpr bcg::ShearCalibration calibration{0.0, 0.0, 0.0, 0.0}; // m1, m2, c1, c2
 
@@ -47,35 +47,38 @@ inline constexpr auto external_columns = [] {
     cols.mag = 11;
     cols.ext_mash = 4;
     cols.expo_num = 0; // Set explicitly for the per-exposure bar.
+    cols.ccd_num = 0; // Set explicitly for the CCD cut.
     cols.expo_chi2 = -1; // Last column.
     return cols;
 }();
 
 // ==========================================
 // Function: Default source cuts initializer
-// Method: Start with every catalog cut disabled; the INI can supply measurement thresholds.
+// Method: Set source selection defaults to the values in esd.example.ini.
 // ==========================================
 inline constexpr auto cuts = [] {
-    bcg::Cuts c{};
+    bcg::CutThresholds c{};
     c.snrfcut = -9999.0;
-    c.snrlow = -9999.0;
+    c.snrlow = 10.0;
     c.snrhigh = -9999.0;
-    c.starcut = -9999.0;
-    c.chi2_thresh = -9999.0;
+    c.starcut = 16.0;
+    c.chi2_thresh = 0.01;
     c.flagcut = -9999.0;
-    c.zplow = -9999.0;
-    c.zphigh = -9999.0;
+    c.zplow = 0.0;
+    c.zphigh = 5.0;
     c.gf_lim = gf_lim;
-    c.imaxcut = -9999.0;
-    c.jmaxcut = -9999.0;
-    c.mag_low = -9999.0;
-    c.mag_high = -9999.0;
+    c.imaxcut = 64.0;
+    c.jmaxcut = 64.0;
+    c.mag_low = 10.0;
+    c.mag_high = 30.0;
     c.psf_chi2_mltp = -9999.0;
     c.r_half_thresh = -9999.0;
     c.ext_cut = -9999.0;
     c.star_bar_mltp = -9999.0;
     c.expo_bar_mltp = -9999.0;
-    c.max_dup = -9999.0;
+    c.max_dup = 5.0;
     return c;
 }();
+
+inline constexpr std::initializer_list<int> excluded_ccds = {}; // Equivalent to ccd-cut = -9999.0.
 } // namespace bcg_esd::defaults

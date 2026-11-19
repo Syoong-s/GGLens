@@ -33,7 +33,7 @@ struct Config {
     std::string covariance_output, replica_output, summary_output, chain_output;
     std::string profile_output, profile_draws_output;
     bcg::ExternalColumns external_columns = defaults::external_columns;
-    bcg::Cuts cuts = defaults::cuts;
+    bcg::Cuts cuts{defaults::cuts, defaults::excluded_ccds};
     bcg::ShearCalibration calibration = defaults::calibration;
     std::int64_t self_calibration_sources = 0;
     // ==========================================
@@ -68,7 +68,7 @@ struct Covariance {
     std::vector<int> fit_bins;
 };
 struct SelfCalibrationDiagnostics;
-Config load_config(MPI_Comm comm);
+Config load_config(const char *ini_path, MPI_Comm comm);
 std::vector<bcg::Lens> load_lenses(const Config &cfg, MPI_Comm comm);
 LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
                           const std::vector<std::unique_ptr<bcg::PairStore>> &bins,

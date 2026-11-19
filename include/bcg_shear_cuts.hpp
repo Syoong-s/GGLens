@@ -11,16 +11,30 @@ constexpr bool cut_enabled(double threshold) {
 }
 
 // ==========================================
-// Structure: Cuts
-// Method: Keep input thresholds and their shared column dependencies together.
+// Structure: CutThresholds
+// Method: Store the scalar cuts for compile-time initialization and INI overrides.
 // ==========================================
-struct Cuts {
+struct CutThresholds {
     double snrfcut, snrlow, snrhigh, starcut;
     double chi2_thresh, flagcut, zplow, zphigh;
     double gf_lim, imaxcut, jmaxcut;
     double mag_low, mag_high, psf_chi2_mltp;
     double r_half_thresh, ext_cut;
     double star_bar_mltp, expo_bar_mltp, max_dup;
+};
+
+// ==========================================
+// Structure: Cuts
+// Method: Keep the configured cuts and their shared column dependencies together.
+// ==========================================
+struct Cuts : CutThresholds {
+    std::vector<int> excluded_ccds; // Sorted during configuration validation.
+
+    // ==========================================
+    // Function: ccd_cut_enabled
+    // Method: Require the CCD column only when at least one ID is excluded.
+    // ==========================================
+    bool ccd_cut_enabled() const { return !excluded_ccds.empty(); }
 
     // ==========================================
     // Function: exposure_bar_enabled / bar_enabled

@@ -10,6 +10,11 @@ using Field = ShearRow::Field;
 // ==========================================
 bool select_shear_row(const ShearRow &row, const Cuts &cuts, Source &source, BarDatum &bar) {
     const auto &v = row.values;
+    // Use the nearest integer CCD ID, as in the FD catalog filter.
+    if (cuts.ccd_cut_enabled() &&
+        std::binary_search(cuts.excluded_ccds.begin(), cuts.excluded_ccds.end(),
+                           std::round(v[Field::ccd_num]))) return false;
+
     const double ra = v[Field::ra], dec = v[Field::dec], zp = v[Field::zp];
     const double gf1 = v[Field::gf1], gf2 = v[Field::gf2];
     const double mag = v[Field::mag];

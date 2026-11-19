@@ -55,15 +55,16 @@ void run(bcg_esd::Config &cfg, MPI_Comm comm) {
 
 // ==========================================
 // Function: main
-// Method: Initialize MPI, run the complete BCG measurement, abort all ranks on error.
+// Method: Accept an optional INI path, run the measurement with MPI, and abort on error.
 // ==========================================
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
     int rank = 0; MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     try {
-        if (argc != 1)
-            throw std::runtime_error("Configure in esd_defaults.hpp or esd.ini and launch without arguments");
-        bcg_esd::Config cfg = bcg_esd::load_config(MPI_COMM_WORLD);
+        if (argc > 2)
+            throw std::runtime_error(std::string("Usage: ") + argv[0] + " [ini-path]");
+        const char *ini_path = argc == 2 ? argv[1] : nullptr;
+        bcg_esd::Config cfg = bcg_esd::load_config(ini_path, MPI_COMM_WORLD);
         run(cfg, MPI_COMM_WORLD);
         MPI_Finalize();
         return 0;
