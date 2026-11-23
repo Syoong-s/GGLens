@@ -1,6 +1,6 @@
 # Developer notes
 
-The executable measures one group sample around one selected center and then fits that measurement in the same run. C++ owns distributed catalog ingest, source selection, pair creation, ESD estimation, and covariance. The Python modules handle the fit and its output data.
+The executable measures one group sample around one selected center and can fit that measurement immediately or in a later run. C++ owns distributed catalog ingest, source selection, pair creation, ESD estimation, and covariance. The Python modules handle the fit and its output data.
 
 | Reference | Scope |
 | --- | --- |
@@ -11,10 +11,10 @@ The executable measures one group sample around one selected center and then fit
 
 ## Execution order
 
-1. Rank 0 reads the INI selected by the optional positional argument, or looks for `esd.ini` in the launch directory. It broadcasts the INI text. All ranks apply it to the compiled defaults and validate the result. Rank 0 reads the shear list and resolves the source fields from the first header.
-2. Resolve lens column positions from the first catalog of each type, then load the selected centers or restore a matching lens cache. Every rank receives the same ordered lens table.
+1. Rank 0 reads the INI selected by the optional positional argument, or looks for `esd.ini` in the launch directory. It broadcasts the INI text. All ranks apply it to the compiled defaults and validate the settings for the selected stage. A fit-only run reads and broadcasts the saved fit input and resumes at step 5.
+2. Rank 0 reads the shear list and resolves the source fields from the first header. Resolve lens column positions from the first catalog of each type, then load the selected centers or restore a matching lens cache. Every rank receives the same ordered lens table.
 3. Source workers apply catalog and calibration selections. They write pair records by radial bin. The participating lenses set the sky regions and the fixed fit inputs.
-4. Measure full-sample and deleted-region ESD profiles. Rank 0 writes these results and their covariance before sampling starts.
+4. Measure full-sample and deleted-region ESD profiles. Rank 0 writes these results and their covariance, then publishes the versioned fit input. A measurement-only run finishes here.
 5. Rank 0 computes the matter correlation and broadcasts it. Assigned ranks run independent ensembles. Rank 0 gathers the chains and publishes the fit data and figure.
 
 ## Code locations
@@ -27,6 +27,7 @@ The executable measures one group sample around one selected center and then fit
 | Source selection and calibration | [bcg_shear_catalog.cpp](../code/src/bcg_shear_catalog.cpp), [bcg_shear_cuts.cpp](../code/src/bcg_shear_cuts.cpp), [bcg_star_bar.cpp](../code/src/bcg_star_bar.cpp), [selfcalibration.cpp](../code/src/selfcalibration.cpp) |
 | Pair storage and measurement | [esd_pairs.cpp](../code/src/esd_pairs.cpp), [bcg_pair_store.cpp](../code/src/bcg_pair_store.cpp), [esd_measure.cpp](../code/src/esd_measure.cpp) |
 | Sky regions and covariance | [esd_regions.cpp](../code/src/esd_regions.cpp), [esd_covariance.cpp](../code/src/esd_covariance.cpp) |
+| Saved fit input | [esd_fit_input.cpp](../code/src/esd_fit_input.cpp) |
 | Fit and plotting bridge | [esd_fit_mpi.cpp](../code/src/esd_fit_mpi.cpp), [esd_fit_backend.cpp](../code/src/esd_fit_backend.cpp), [esd_fit.py](../code/script/esd_fit.py) |
 
 ## Build and runtime
@@ -47,6 +48,8 @@ Apply the preload to a mixed environment that needs it. Choose `OMP_NUM_THREADS=
 ## Validation cases
 
 Run `make -C code test-catalogs` with an MPI installation that can launch four ranks. Set `MPIEXEC` and `MPIEXEC_FLAGS` for the local launcher. The test compares BCG, LWC, and NWC centers from DR9, reordered CSV, and catalogs that identify objects by data row number. It also exercises minimal NWC inputs, startup column errors, and cache invalidation.
+
+Run `make -C code test-stages` with the fit dependencies and two MPI ranks. It compares the fit chain and summary from a combined run, a later fit using the saved input, and a fit using the earlier ESD and covariance table layout. Set `FQ_GGLENS_TEST_PYTHON_PATH` if the embedded interpreter needs an additional package directory.
 
 | Area | Reference check |
 | --- | --- |

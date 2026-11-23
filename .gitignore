@@ -10,6 +10,7 @@ __pycache__/
 /shear/
 /esd.ini
 /shear_catalogs.list
+/results/
 /.bcg_scratch/
 /lens_cache.dat
 /ESD_results.dat

@@ -124,10 +124,11 @@ FitBackend::~FitBackend() = default;
 // Function: correlation
 // Method: Generate the nonlinear matter correlation once for the whole stack.
 // ==========================================
-std::vector<double> FitBackend::correlation(const Config &cfg, const LensStack &stack) {
+std::vector<double> FitBackend::correlation(const FitInput::Metadata &metadata) {
+    const auto &c = metadata.cosmology;
     auto corr = checked(PyObject_CallMethod(runtime_->module.get(), "nonlinear_correlation", "ddddddd",
-                                           cfg.omega_m, cfg.h, cfg.omega_b_h2, cfg.spectral_index,
-                                           cfg.sigma8, cfg.neutrino_mass, stack.redshift));
+                                           c.omega_m, c.h, c.omega_b_h2, c.spectral_index,
+                                           c.sigma8, c.neutrino_mass, metadata.sample.redshift));
     return doubles(corr.get());
 }
 
@@ -135,15 +136,14 @@ std::vector<double> FitBackend::correlation(const Config &cfg, const LensStack &
 // Function: setup
 // Method: Provide the measurement and covariance arrays directly to the likelihood.
 // ==========================================
-void FitBackend::setup(const FitInput &input, const std::vector<double> &corr,
-                       const Config &cfg, const LensStack &stack) {
+void FitBackend::setup(const FitInput &input, const std::vector<double> &corr) {
     const auto radius = as_list(input.radius);
     const auto measured = as_list(input.measured);
     const auto covariance = as_list(input.covariance);
     const auto data = packed(corr);
     runtime_->problem = checked(PyObject_CallMethod(runtime_->module.get(), "FitProblem", "OOOddO",
                                radius.get(), measured.get(), covariance.get(),
-                               stack.stellar_mass, cfg.omega_m, data.get()));
+                               input.metadata.sample.stellar_mass, input.metadata.cosmology.omega_m, data.get()));
 }
 
 // ==========================================
@@ -161,8 +161,7 @@ FitChain FitBackend::sample(const Config &cfg, int ensemble) {
 // Function: finish
 // Method: Pass product paths and metadata for final posterior export and rendering.
 // ==========================================
-void FitBackend::finish(const FitChain &chain, const Config &cfg, const LensStack &stack,
-                        const std::vector<int> &fit_bins) {
+void FitBackend::finish(const FitChain &chain, const Config &cfg, const FitInput &input) {
     const auto samples = packed(chain.samples);
     const auto stats = packed(chain.diagnostics);
     const auto shape = checked(Py_BuildValue("(iii)", cfg.fit_ensembles,
@@ -171,14 +170,26 @@ void FitBackend::finish(const FitChain &chain, const Config &cfg, const LensStac
         "summary", cfg.summary_output.c_str(), "chain", cfg.chain_output.c_str(),
         "profiles", cfg.profile_output.c_str(), "draws", cfg.profile_draws_output.c_str(),
         "plot", cfg.fit_plot.c_str()));
-    const auto bins = checked(PyList_New(fit_bins.size()));
-    for (std::size_t i = 0; i < fit_bins.size(); ++i)
-        PyList_SET_ITEM(bins.get(), i, checked(PyLong_FromLong(fit_bins[i])).release());
-    const auto context = checked(Py_BuildValue("{s:s,s:d,s:n,s:i,s:i,s:i,s:i,s:s,s:O}",
-        "center", bcg::center_name(cfg.center), "redshift", stack.redshift,
-        "n_lenses", static_cast<Py_ssize_t>(stack.n_lenses), "regions", stack.regions,
+    const auto bins = checked(PyList_New(input.bins.size()));
+    for (std::size_t i = 0; i < input.bins.size(); ++i)
+        PyList_SET_ITEM(bins.get(), i, checked(PyLong_FromLong(input.bins[i])).release());
+    const auto &sample = input.metadata.sample;
+    const auto &c = input.metadata.cosmology;
+    const auto cosmology = checked(Py_BuildValue("{s:d,s:d,s:d,s:d,s:d,s:d}",
+        "omega_m", c.omega_m, "h", c.h, "sigma8", c.sigma8, "omega_b_h2", c.omega_b_h2,
+        "spectral_index", c.spectral_index, "neutrino_mass_eV", c.neutrino_mass));
+    const char *center = bcg::center_name(input.metadata.center);
+    std::string title = cfg.plot_title;
+    if (title.empty()) {
+        title = center;
+        for (char &letter : title) letter = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
+        title += "-centered group lensing";
+    }
+    const auto context = checked(Py_BuildValue("{s:s,s:d,s:L,s:i,s:i,s:i,s:i,s:s,s:O,s:O}",
+        "center", center, "redshift", sample.redshift,
+        "n_lenses", static_cast<long long>(sample.n_lenses), "regions", sample.regions,
         "burn_in", cfg.fit_burn, "profile_draws", cfg.fit_profile_draws, "seed", cfg.fit_seed,
-        "title", cfg.plot_title.c_str(), "fit_bins", bins.get()));
+        "title", title.c_str(), "fit_bins", bins.get(), "cosmology", cosmology.get()));
     checked(PyObject_CallMethod(runtime_->module.get(), "finish_fit", "OOOOOO",
                                runtime_->problem.get(), samples.get(), stats.get(),
                                shape.get(), paths.get(), context.get()));

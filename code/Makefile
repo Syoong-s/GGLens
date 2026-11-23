@@ -47,10 +47,13 @@ $(CATALOG_TEST): tests/catalogs.cpp $(CATALOG_OBJECTS) Makefile
 test-catalogs: $(CATALOG_TEST)
 	$(PYTHON) tests/catalogs.py $(CATALOG_TEST) $(MPIEXEC) $(MPIEXEC_FLAGS)
 
+test-stages: $(TARGET)
+	$(PYTHON) tests/stages.py $(TARGET) $(MPIEXEC) $(MPIEXEC_FLAGS)
+
 clean:
 	rm -f $(TARGET) $(CATALOG_TEST) $(OBJECTS) $(FIT_LIB) $(FIT_OBJECT) $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d) $(FIT_SOURCES) $(addsuffix .tmp,$(FIT_SOURCES))
 	@rmdir $(BUILD_DIR) 2>/dev/null || true
 
 -include $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d)
 
-.PHONY: all clean test-catalogs
+.PHONY: all clean test-catalogs test-stages

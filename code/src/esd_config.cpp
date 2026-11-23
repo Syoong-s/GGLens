@@ -4,6 +4,21 @@
 #include <variant>
 
 namespace bcg_esd {
+Stage parse_stage(const std::string &name) {
+    if (name == "all") return Stage::all;
+    if (name == "measure") return Stage::measure;
+    if (name == "fit") return Stage::fit;
+    throw std::invalid_argument("stage must be all, measure or fit");
+}
+
+void validate_cosmology(const CosmologyParameters &c) {
+    if (!(c.omega_m > 0 && c.omega_m < 1 && std::isfinite(c.h) && c.h > 0 &&
+          std::isfinite(c.sigma8) && c.sigma8 > 0 && std::isfinite(c.spectral_index) && c.spectral_index > 0 &&
+          c.omega_b_h2 > 0 && c.neutrino_mass >= 0 &&
+          c.omega_m*c.h*c.h > c.omega_b_h2 + c.neutrino_mass/93.14))
+        throw std::runtime_error("Invalid cosmology parameters");
+}
+
 namespace {
 // ==========================================
 // Function: parse_ccd_cut
@@ -37,13 +52,15 @@ std::vector<int> parse_ccd_cut(const std::string &input) {
 // Method: Overlay typed INI keys on compiled defaults and report invalid keys at their line.
 // ==========================================
 void apply_ini(Config &c, const std::string &text) {
-    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *, std::vector<int> *,
+    using Setting = std::variant<std::string *, double *, int *, bool *, Stage *, bcg::Center *, std::vector<int> *,
                                  bcg::CatalogDelimiter *, bcg::MassFormat *>;
     auto &[group, galaxy, member] = c.lens_columns;
     const std::unordered_map<std::string, Setting> settings{
+        {"run.stage", &c.stage},
         {"run.group-list", &c.group_list},
         {"run.shear-list", &c.shear_list},
         {"run.output", &c.output},
+        {"run.output-dir", &c.output_dir},
         {"run.cache", &c.cache},
         {"run.scratch-dir", &c.scratch_dir},
         {"run.memory-mb", &c.memory_mib},
@@ -55,12 +72,12 @@ void apply_ini(Config &c, const std::string &text) {
         {"measurement.r-min", &c.rmin},
         {"measurement.r-max", &c.rmax},
         {"measurement.dz-min", &c.dzmin},
-        {"measurement.omega-m", &c.omega_m},
-        {"measurement.h", &c.h},
-        {"measurement.sigma8", &c.sigma8},
-        {"measurement.omega-b-h2", &c.omega_b_h2},
-        {"measurement.spectral-index", &c.spectral_index},
-        {"measurement.neutrino-mass", &c.neutrino_mass},
+        {"measurement.omega-m", &c.cosmology.omega_m},
+        {"measurement.h", &c.cosmology.h},
+        {"measurement.sigma8", &c.cosmology.sigma8},
+        {"measurement.omega-b-h2", &c.cosmology.omega_b_h2},
+        {"measurement.spectral-index", &c.cosmology.spectral_index},
+        {"measurement.neutrino-mass", &c.cosmology.neutrino_mass},
         {"measurement.n-r-bins", &c.n_r_bins},
         {"measurement.n-jack", &c.n_jack},
         {"measurement.pdf-bins", &c.pdf_bins},
@@ -123,6 +140,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"cuts.star-bar-mltp", &c.cuts.star_bar_mltp},
         {"cuts.expo-bar-mltp", &c.cuts.expo_bar_mltp},
         {"cuts.ccd-cut", &c.cuts.excluded_ccds},
+        {"fit.input", &c.fit_input_path},
         {"fit.walkers", &c.fit_walkers},
         {"fit.steps", &c.fit_steps},
         {"fit.burn-in", &c.fit_burn},
@@ -171,6 +189,8 @@ void apply_ini(Config &c, const std::string &text) {
                     *dest = value;
                 } else if constexpr (std::is_same_v<T, std::vector<int>>) {
                     *dest = parse_ccd_cut(value);
+                } else if constexpr (std::is_same_v<T, Stage>) {
+                    *dest = parse_stage(value);
                 } else if constexpr (std::is_same_v<T, bcg::Center>) {
                     *dest = bcg::parse_center(value);
                 } else if constexpr (std::is_same_v<T, bcg::CatalogDelimiter>) {
@@ -200,19 +220,19 @@ void apply_ini(Config &c, const std::string &text) {
 }
 
 // ==========================================
-// Function: validate_config
-// Method: Validate ranges and resolve output defaults after the INI overlay.
+// Function: validate_measurement_config
+// Method: Check the settings used by catalog ingestion and measurement.
 // ==========================================
-void validate_config(Config &c) {
+void validate_measurement_config(Config &c) {
     if (!c.self_calibrate) c.calibration.validate();
-    if (c.group_list.empty() || c.shear_list.empty() || c.output.empty())
-        throw std::runtime_error("run.group-list, run.shear-list and run.output must be set");
+    if (c.group_list.empty() || c.shear_list.empty())
+        throw std::runtime_error("run.group-list and run.shear-list must be set for measurement");
+    validate_cosmology(c.cosmology);
     if (!(c.zmin >= 0 && c.zmax > c.zmin && c.mmax > c.mmin && c.rmin > 0 && c.rmax > c.rmin &&
-          c.dzmin >= 0 && c.omega_m > 0 && c.omega_m < 1 && c.h > 0 && c.sigma8 > 0 &&
-          c.omega_b_h2 > 0 && c.neutrino_mass >= 0 && c.spectral_index > 0 &&
-          c.omega_m*c.h*c.h > c.omega_b_h2 + c.neutrino_mass/93.14 &&
-          c.n_r_bins >= 6 && c.n_jack > 6 && c.pdf_bins > 0))
+          c.dzmin >= 0 && c.n_r_bins >= 1 && c.n_jack >= 2 && c.pdf_bins > 0))
         throw std::runtime_error("Invalid measurement parameter range");
+    if (c.stage == Stage::all && (c.n_r_bins < 6 || c.n_jack < 7))
+        throw std::runtime_error("A combined run needs at least six radial bins and seven requested jackknife regions");
     auto &excluded_ccds = c.cuts.excluded_ccds;
     std::sort(excluded_ccds.begin(), excluded_ccds.end());
     excluded_ccds.erase(std::unique(excluded_ccds.begin(), excluded_ccds.end()), excluded_ccds.end());
@@ -240,7 +260,7 @@ void validate_config(Config &c) {
         static_cast<std::uint64_t>(c.n_jack + 1LL) * 2049 * sizeof(std::int64_t) > budget / 4 ||
         static_cast<std::uint64_t>(c.n_jack + 1LL) * (c.pdf_bins + 1LL) * 4 * 61 * sizeof(std::int64_t)
             > budget / 4 ||
-        static_cast<std::uint64_t>(c.n_r_bins) * 16384 > budget / 8 || c.n_r_bins > 256)
+        static_cast<std::uint64_t>(c.n_r_bins) * 16384 > budget / 8 || c.n_r_bins > max_radial_bins)
         throw std::runtime_error("Bin/replica/duplicate configuration exceeds memory or open-file budget");
     if (c.self_calibrate) {
         if (!(c.fd_limit() > 0 && c.selfcal_fd_bins >= 2 && c.selfcal_fd_bins <= 100 &&
@@ -248,6 +268,9 @@ void validate_config(Config &c) {
               c.selfcal_min_count > c.selfcal_pdf_bins && c.selfcal_search_width > 0))
             throw std::runtime_error("Invalid self-calibration FD settings");
     }
+}
+
+void validate_fit_config(const Config &c) {
     if (c.fit_walkers < 10 || c.fit_walkers % 2 || c.fit_steps <= c.fit_burn ||
         c.fit_burn < 0 || c.fit_ensembles < 1 || c.fit_seed < 0)
         throw std::runtime_error("Invalid MCMC settings: use >=10 even walkers and steps > burn-in");
@@ -257,36 +280,64 @@ void validate_config(Config &c) {
                               (c.fit_steps - c.fit_burn) * c.fit_ensembles * 6;
     if (chain_values > std::numeric_limits<int>::max())
         throw std::runtime_error("MCMC chain exceeds MPI count limits");
-    const auto path = bcg::fs::path(c.output);
-    const auto base = (path.parent_path() / path.stem()).string();
-    c.covariance_output = base + "_cov.dat";
-    c.replica_output = base + "_jackknife.dat";
-    c.summary_output = base + "_fit.json";
-    c.chain_output = base + "_chain.npz";
-    c.profile_output = base + "_profiles.dat";
-    c.profile_draws_output = base + "_profile_draws.npz";
-    if (!c.cache.empty() && c.center != bcg::Center::bcg) {
-        const bcg::fs::path cache(c.cache);
-        c.cache = (cache.parent_path() / (cache.stem().string() + "_" +
-                   bcg::center_name(c.center) + cache.extension().string())).string();
+}
+
+void resolve_outputs(Config &c, int rank) {
+    using bcg::fs::path;
+    const path output(c.output), directory(c.output_dir);
+    if (output.filename().empty() || output.filename() == "." || output.filename() == "..")
+        throw std::runtime_error("run.output must name an ESD file");
+    if (!directory.empty() && output.has_parent_path())
+        throw std::runtime_error("run.output must be a filename when run.output-dir is set");
+
+    const path result_root = directory.empty() ? output.parent_path() : directory;
+    const path measurement = directory.empty() ? output : directory / "measurement" / output;
+    const auto measurement_base = (measurement.parent_path() / measurement.stem()).string();
+    c.output = measurement.string();
+    c.covariance_output = measurement_base + "_cov.dat";
+    c.replica_output = measurement_base + "_jackknife.dat";
+    c.fit_input_output = measurement_base + "_fit_input.dat";
+
+    if (c.stage != Stage::fit) {
+        if (!c.cache.empty() && c.center != bcg::Center::bcg) {
+            const path cache(c.cache);
+            c.cache = (cache.parent_path() / (cache.stem().string() + "_" +
+                       bcg::center_name(c.center) + cache.extension().string())).string();
+        }
+        if (c.scratch_dir.empty())
+            c.scratch_dir = bcg::fs::absolute(result_root / ".bcg_scratch").string();
     }
-    if (c.plot_title.empty()) {
-        std::string label = bcg::center_name(c.center);
-        for (char &letter : label) letter = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
-        c.plot_title = label + "-centered group lensing";
+    if (c.stage != Stage::measure) {
+        const auto fit_base = (result_root / output.stem()).string();
+        c.summary_output = fit_base + "_fit.json";
+        c.chain_output = fit_base + "_chain.npz";
+        c.profile_output = fit_base + "_profiles.dat";
+        c.profile_draws_output = fit_base + "_profile_draws.npz";
+        c.fit_plot = c.fit_plot.empty() ? fit_base + "_fit.png" : (directory / c.fit_plot).string();
+        if (path(c.fit_plot).extension() != ".png")
+            throw std::runtime_error("Plot output must end in .png: " + c.fit_plot);
     }
-    if (c.fit_plot.empty()) c.fit_plot = base + "_fit.png";
-    if (bcg::fs::path(c.fit_plot).extension() != ".png")
-        throw std::runtime_error("Plot output must end in .png: " + c.fit_plot);
-    std::unordered_set<std::string> outputs;
-    for (const auto &output : {c.output, c.cache, c.fit_plot, c.covariance_output,
-                               c.replica_output, c.summary_output, c.chain_output,
-                               c.profile_output, c.profile_draws_output}) {
-        if (!output.empty() && !outputs.insert(bcg::fs::weakly_canonical(
-                bcg::fs::absolute(output)).string()).second)
-            throw std::runtime_error("Each output must have a distinct path: " + output);
+
+    if (rank == 0) {
+        const auto canonical = [](const std::string &file) {
+            return bcg::fs::weakly_canonical(bcg::fs::absolute(file)).string();
+        };
+        std::unordered_set<std::string> paths{
+            canonical(c.output), canonical(c.covariance_output), canonical(c.replica_output), canonical(c.fit_input_output)
+        };
+        if (c.stage != Stage::fit && paths.size() != 4)
+            throw std::runtime_error("Each measurement product must have a distinct path");
+        if (c.stage == Stage::fit && !c.fit_input_path.empty()) paths.insert(canonical(c.fit_input_path));
+        const auto require_distinct = [&](const std::string &file) {
+            if (!file.empty() && !paths.insert(canonical(file)).second)
+                throw std::runtime_error("Each output must have a distinct path: " + file);
+        };
+        if (c.stage != Stage::fit) require_distinct(c.cache);
+        if (c.stage != Stage::measure) {
+            for (const auto &file : {c.fit_plot, c.summary_output, c.chain_output, c.profile_output, c.profile_draws_output})
+                require_distinct(file);
+        }
     }
-    if (c.scratch_dir.empty()) c.scratch_dir = (bcg::fs::absolute(c.output).parent_path() / ".bcg_scratch").string();
 }
 } // namespace
 
@@ -294,7 +345,7 @@ void validate_config(Config &c) {
 // Function: load_config
 // Method: Read the supplied INI or the default file on rank zero and broadcast its text.
 // ==========================================
-Config load_config(const char *ini_path, MPI_Comm comm) {
+Config load_config(const char *ini_path, MPI_Comm comm, const char *stage_override) {
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
     std::string text;
@@ -321,7 +372,10 @@ Config load_config(const char *ini_path, MPI_Comm comm) {
     MPI_Bcast(text.data(), size, MPI_CHAR, 0, comm);
     Config cfg;
     apply_ini(cfg, text);
-    validate_config(cfg);
+    if (stage_override) cfg.stage = parse_stage(stage_override);
+    if (cfg.stage != Stage::fit) validate_measurement_config(cfg);
+    if (cfg.stage != Stage::measure) validate_fit_config(cfg);
+    resolve_outputs(cfg, rank);
     return cfg;
 }
 } // namespace bcg_esd

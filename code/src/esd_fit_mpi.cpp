@@ -5,18 +5,24 @@
 namespace bcg_esd {
 namespace {
 // ==========================================
-// Function: fit_input
-// Method: Extract the supported radial submatrix in the same order as the observation vector.
+// Function: broadcast_input
+// Method: Send the compact fit data from the rank that measured or read it.
 // ==========================================
-FitInput fit_input(const std::vector<Result> &results, const Covariance &covariance) {
-    FitInput input;
-    for (const int i : covariance.fit_bins) {
-        input.radius.push_back(results[i].effective);
-        input.measured.push_back(results[i].measured);
-        for (const int j : covariance.fit_bins)
-            input.covariance.push_back(covariance.matrix[i*results.size() + j]);
+void broadcast_input(FitInput &input, int rank, MPI_Comm comm) {
+    static_assert(std::is_trivially_copyable_v<FitInput::Metadata>);
+    MPI_Bcast(&input.metadata, sizeof(input.metadata), MPI_BYTE, 0, comm);
+    int count = static_cast<int>(input.bins.size());
+    MPI_Bcast(&count, 1, MPI_INT, 0, comm);
+    if (rank) {
+        input.bins.resize(count);
+        input.radius.resize(count);
+        input.measured.resize(count);
+        input.covariance.resize(count * count);
     }
-    return input;
+    MPI_Bcast(input.bins.data(), count, MPI_INT, 0, comm);
+    MPI_Bcast(input.radius.data(), count, MPI_DOUBLE, 0, comm);
+    MPI_Bcast(input.measured.data(), count, MPI_DOUBLE, 0, comm);
+    MPI_Bcast(input.covariance.data(), count * count, MPI_DOUBLE, 0, comm);
 }
 
 // ==========================================
@@ -47,24 +53,28 @@ std::vector<double> gather_chain(const std::vector<double> &local, int ensembles
 // Function: fit_esd
 // Method: Share one CAMB run, sample independent ensembles on MPI ranks, and combine retained draws.
 // ==========================================
-void fit_esd(const std::vector<Result> &results, const Covariance &covariance,
-             const LensStack &stack, const Config &cfg, MPI_Comm comm) {
-    const auto fit_bins = covariance.fit_bins.size();
-    if (fit_bins <= 5)
-        throw std::runtime_error("Five-parameter ESD fit needs at least six complete jackknife bins");
-    if (static_cast<std::size_t>(stack.regions) <= fit_bins)
-        throw std::runtime_error("A full-rank covariance needs more jackknife regions than fitted radial bins");
-
+void fit_esd(FitInput input, const Config &cfg, MPI_Comm comm) {
     int rank = 0, ranks = 1;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &ranks);
+    if (!rank) {
+        validate_fit_input(input);
+        if (input.bins.size() <= 5)
+            throw std::runtime_error("Five-parameter ESD fit needs at least six complete jackknife bins");
+        if (static_cast<std::size_t>(input.metadata.sample.regions) <= input.bins.size())
+            throw std::runtime_error("A full-rank covariance needs more jackknife regions than fitted radial bins");
+        for (const auto &file : {cfg.summary_output, cfg.fit_plot})
+            bcg::fs::create_directories(bcg::fs::absolute(file).parent_path());
+    }
+    broadcast_input(input, rank, comm);
+
     const auto [begin, end] = bcg::partition(cfg.fit_ensembles, rank, ranks);
     std::unique_ptr<FitBackend> backend;
     if (begin < end) backend = std::make_unique<FitBackend>(cfg);
     std::vector<double> corr;
     if (!rank) {
-        std::cout << "Computing nonlinear CAMB/Halofit correlation at z=" << stack.redshift << std::endl;
-        corr = backend->correlation(cfg, stack);
+        std::cout << "Computing nonlinear CAMB/Halofit correlation at z=" << input.metadata.sample.redshift << std::endl;
+        corr = backend->correlation(input.metadata);
     }
     int size = static_cast<int>(corr.size());
     MPI_Bcast(&size, 1, MPI_INT, 0, comm);
@@ -74,7 +84,7 @@ void fit_esd(const std::vector<Result> &results, const Covariance &covariance,
     FitChain local;
     const int stride = 6 * cfg.fit_walkers * (cfg.fit_steps - cfg.fit_burn);
     if (backend) {
-        backend->setup(fit_input(results, covariance), corr, cfg, stack);
+        backend->setup(input, corr);
         local.samples.reserve((end - begin) * stride);
         local.diagnostics.reserve((end - begin) * 6);
         for (auto ensemble = begin; ensemble < end; ++ensemble) {
@@ -87,6 +97,6 @@ void fit_esd(const std::vector<Result> &results, const Covariance &covariance,
     }
     FitChain combined{gather_chain(local.samples, cfg.fit_ensembles, stride, comm),
                       gather_chain(local.diagnostics, cfg.fit_ensembles, 6, comm)};
-    if (!rank) backend->finish(combined, cfg, stack, covariance.fit_bins);
+    if (!rank) backend->finish(combined, cfg, input);
 }
 } // namespace bcg_esd

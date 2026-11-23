@@ -2,10 +2,6 @@
 #include "bcg_esd.hpp"
 
 namespace bcg_esd {
-struct FitInput {
-    std::vector<double> radius, measured, covariance;
-};
-
 struct FitChain {
     std::vector<double> samples, diagnostics;
 };
@@ -20,11 +16,9 @@ class FitBackend {
 public:
     explicit FitBackend(const Config &cfg);
     ~FitBackend();
-    std::vector<double> correlation(const Config &cfg, const LensStack &stack);
-    void setup(const FitInput &input, const std::vector<double> &corr,
-               const Config &cfg, const LensStack &stack);
+    std::vector<double> correlation(const FitInput::Metadata &metadata);
+    void setup(const FitInput &input, const std::vector<double> &corr);
     FitChain sample(const Config &cfg, int ensemble);
-    void finish(const FitChain &chain, const Config &cfg, const LensStack &stack,
-                const std::vector<int> &fit_bins);
+    void finish(const FitChain &chain, const Config &cfg, const FitInput &input);
 };
 } // namespace bcg_esd

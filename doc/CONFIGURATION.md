@@ -1,15 +1,17 @@
 # Configuration
 
-Pass the configuration file path as the sole argument to `esd_bcg_mpi`. With no argument, the program looks for `esd.ini` in the launch directory and uses built-in defaults if the file is absent. Omitted keys use their defaults. Relative paths in the INI start from the launch directory.
+Pass the configuration file path to `esd_bcg_mpi`. When the path is omitted, the program looks for `esd.ini` in the launch directory and uses built-in defaults if the file is absent. Omitted keys use their defaults. Relative paths in the INI start from the launch directory, with the output path rules below.
 
 ## Run paths
 
 | Key under `[run]` | What to set |
 | --- | --- |
-| `group-list`, `shear-list` | Paths to the two input lists. The defaults are `group_catalogs.list` and `shear_catalogs.list` in the launch directory. Both files are required. [Input formats](INPUTS.md) |
-| `output` | Filename for the measured ESD table. The default is `ESD_results.dat`. Create its parent directory and use a distinct name for each result you want to keep. |
-| `cache` | Optional path to save and reuse resolved centers. LWC and NWC add `_lwc` or `_nwc` before the extension. Create the cache's parent directory. |
-| `scratch-dir` | Directory for temporary files. The default is `.bcg_scratch` beside the ESD table. On a multi-node run, use a shared location with sufficient free space. |
+| `stage` | `all` runs measurement followed by fitting and is the default. `measure` saves the ESD and fit input. `fit` reads an existing measurement and runs the five-parameter fit. Use `--stage all`, `--stage measure`, or `--stage fit` to override the INI for one launch. |
+| `group-list`, `shear-list` | Paths to the two input lists, required for `measure` and `all`. The defaults are `group_catalogs.list` and `shear_catalogs.list` in the launch directory. [Input formats](INPUTS.md) |
+| `output-dir` | Optional result directory. Measurement files go in its `measurement/` subdirectory and fit products go in the result directory. The program creates the directories it writes to. |
+| `output` | Name of the ESD table and source of the shared file prefix, by default `ESD_results.dat`. Use a filename with `output-dir`. With `output-dir` omitted, `output` can be a path and all products go beside the ESD table. |
+| `cache` | Optional path to save and reuse resolved centers. LWC and NWC add `_lwc` or `_nwc` before the extension. |
+| `scratch-dir` | Directory for temporary files. The default is `.bcg_scratch` inside `output-dir` or beside the ESD table when `output-dir` is omitted. On a multi-node run, use a shared location with sufficient free space. |
 | `memory-mb` | Buffer budget per process in MiB. Default `512`, minimum `64`. |
 
 ## Group sample and measurement
@@ -20,9 +22,9 @@ Pass the configuration file path as the sole argument to `esd_bcg_mpi`. With no 
 | `z-min`, `z-max` | `0.3`, `0.4` | Group redshift range. The lower limit is included and the upper limit is excluded. |
 | `logm-min`, `logm-max` | `13.0`, `14.2` | Group catalog mass range in base-10 log of solar masses divided by `h`. The lower limit is included and the upper limit is excluded. |
 | `r-min`, `r-max` | `0.1`, `100.0` | Projected radius range in comoving Mpc divided by `h`. The lower limit is included and the upper limit is excluded. |
-| `n-r-bins` | `12` | Number of radial bins from `6` to `256`. |
+| `n-r-bins` | `12` | Number of radial bins, up to `256`. Measurement alone needs at least one bin. The fit needs at least six bins with complete jackknife measurements. |
 | `dz-min` | `0.2` | A source must be more than this redshift difference behind its group. |
-| `n-jack` | `400` | Target number of sky regions for measurement uncertainties, at least `7`. A fit needs more usable regions than fitted radial bins. |
+| `n-jack` | `400` | Target number of sky regions for measurement uncertainties. Use at least `2` for measurement only or `7` for `all`. The fit needs more usable regions than fitted radial bins. |
 | `pdf-bins` | `4` | Keep the default for a standard run. |
 
 Use matching cosmology settings when comparing samples. The defaults are `omega-m` at `0.315`, `h` at `0.674`, `sigma8` at `0.811`, `omega-b-h2` at `0.02237`, `spectral-index` at `0.965`, and `neutrino-mass` at `0.06` eV. The program generates its fit inputs from these settings.
@@ -100,10 +102,13 @@ Enter any number of nonnegative CCD IDs on one line, separated by commas. For ex
 
 | Key under `[fit]` | Default | What to set |
 | --- | --- | --- |
+| `input` | unset | In `stage = fit`, set a path to a `*_fit_input.dat` saved by a measurement. When omitted, the program uses the `*_fit_input.dat` derived from `[run] output` and `output-dir`. |
 | `walkers` | `72` | Even number, at least `10`. |
 | `steps`, `burn-in` | `10000`, `1000` | Steps per walker and initial steps to discard. Use fewer discard steps than total steps. |
 | `ensembles`, `seed` | `4`, `12771` | Number of independent fit runs and the nonnegative seed. |
 | `profile-draws` | `4096` | Maximum number of fitted profile draws to save. The full parameter chain is saved separately. |
 | `python-path` | unset | Optional directory containing Python packages for the fit. |
 
-In `[plots]`, set `title` to override the default center-based title or set `esd-plot` to choose a different `.png` path. The default figure name follows the ESD table name. [Result files](RESULTS.md)
+The saved fit input supplies the center, lens statistics, and cosmology. To use an earlier FQ GGLens measurement, set `input` to its eight-column ESD table and keep its `*_cov.dat` beside it. When `input` is omitted and the derived fit-input file is absent, the program also checks the ESD table at the configured output path. For these earlier tables, copy the cosmology keys from the original `[measurement]` settings into the fit INI.
+
+In `[plots]`, set `title` to override the default center-based title or set `esd-plot` to choose a different `.png` path. With `output-dir` set, a relative `esd-plot` starts from that directory. The default figure name follows the ESD table name. [Result files](RESULTS.md)

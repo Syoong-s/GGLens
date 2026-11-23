@@ -4,13 +4,15 @@
 
 namespace {
 // ==========================================
-// Function: run
-// Method: Run DR9 matching, source pairing, jackknife measurement, MCMC, and the final figure.
+// Function: measure
+// Method: Measure the ESD and publish the data needed to fit it on a later run.
 // ==========================================
-void run(bcg_esd::Config &cfg, MPI_Comm comm) {
+bcg_esd::FitInput measure(bcg_esd::Config &cfg, MPI_Comm comm) {
     int rank = 0, size = 1;
     MPI_Comm_rank(comm, &rank); MPI_Comm_size(comm, &size);
     if (!rank) {
+        bcg::fs::create_directories(bcg::fs::absolute(cfg.output).parent_path());
+        if (!cfg.cache.empty()) bcg::fs::create_directories(bcg::fs::absolute(cfg.cache).parent_path());
         std::cout << "Lens center: " << bcg::center_name(cfg.center) << std::endl;
         if (cfg.self_calibrate) std::cout << "Self-calibration enabled: Cartesian all-R union; manual m/c will be overridden" << std::endl;
         else std::cout << "Shear calibration: " << cfg.calibration.description() << std::endl;
@@ -43,28 +45,58 @@ void run(bcg_esd::Config &cfg, MPI_Comm comm) {
         results.push_back(std::move(result));
     }
     scratch.cleanup(comm);
-    const auto covariance = bcg_esd::jackknife_covariance(results, stack.regions);
-    if (!rank) {
-        bcg_esd::write_results(results, covariance, stack, cfg);
-        std::cout << "Saved ESD and jackknife covariance: " << cfg.output << std::endl;
+    if (rank) return {};
+    const auto covariance = bcg_esd::jackknife_covariance(results, stack.sample.regions);
+    auto input = bcg_esd::make_fit_input(results, covariance, stack.sample, cfg.center, cfg.cosmology);
+    bcg_esd::write_results(results, covariance, input, cfg);
+    std::cout << "Saved ESD and jackknife covariance: " << cfg.output << '\n'
+              << "Saved ESD fit input: " << cfg.fit_input_output << std::endl;
+    return input;
+}
+
+void run(bcg_esd::Config &cfg, MPI_Comm comm) {
+    using bcg_esd::Stage;
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
+    bcg_esd::FitInput input;
+    if (cfg.stage == Stage::fit) {
+        if (!rank) input = bcg_esd::load_fit_input(cfg);
+    } else {
+        input = measure(cfg, comm);
+        if (cfg.stage == Stage::measure) return;
     }
-    bcg_esd::fit_esd(results, covariance, stack, cfg, comm);
+    bcg_esd::fit_esd(std::move(input), cfg, comm);
     if (!rank) std::cout << "Fit figure: " << cfg.fit_plot << std::endl;
 }
 } // namespace
 
 // ==========================================
 // Function: main
-// Method: Accept an optional INI path, run the measurement with MPI, and abort on error.
+// Method: Accept an INI path and optional stage override and abort all ranks on error.
 // ==========================================
 int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
     int rank = 0; MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     try {
-        if (argc > 2)
-            throw std::runtime_error(std::string("Usage: ") + argv[0] + " [ini-path]");
-        const char *ini_path = argc == 2 ? argv[1] : nullptr;
-        bcg_esd::Config cfg = bcg_esd::load_config(ini_path, MPI_COMM_WORLD);
+        const std::string usage = std::string("Usage: ") + argv[0] + " [--stage all|measure|fit] [ini-path]";
+        const char *ini_path = nullptr;
+        const char *stage = nullptr;
+        for (int i = 1; i < argc; ++i) {
+            const std::string option(argv[i]);
+            if (option == "--help" || option == "-h") {
+                if (!rank) std::cout << usage << std::endl;
+                MPI_Finalize();
+                return 0;
+            }
+            if (option == "--stage" && !stage && i + 1 < argc) {
+                stage = argv[++i];
+            } else if (!ini_path && !option.empty() && option.front() != '-') {
+                ini_path = argv[i];
+            } else {
+                throw std::runtime_error(usage);
+            }
+        }
+        bcg_esd::Config cfg = bcg_esd::load_config(ini_path, MPI_COMM_WORLD, stage);
         run(cfg, MPI_COMM_WORLD);
         MPI_Finalize();
         return 0;

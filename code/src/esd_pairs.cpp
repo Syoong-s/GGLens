@@ -58,7 +58,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
         bins.emplace_back(new bcg::PairStore(scratch.path("pairs_" + std::to_string(i) + ".bin"),
             budget / 8, budget / 8 / static_cast<std::size_t>(cfg.n_r_bins), lenses.size(), 1));
     const auto edges = radial_edges(cfg);
-    bcg::Cosmology cosmo(cfg.omega_m, cfg.h);
+    bcg::Cosmology cosmo(cfg.cosmology.omega_m, cfg.cosmology.h);
     struct Geometry { double chi = 0, chord = 0; std::array<double, 3> xyz{}; };
     std::vector<Geometry> geometry(lenses.size());
     for (std::size_t i = 0; i < lenses.size(); ++i) {

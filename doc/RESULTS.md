@@ -1,17 +1,20 @@
 # Results
 
-With `[run] output = ESD_results.dat`, a successful run writes these files. Changing the output name changes the shared prefix. The figure path can also be set separately in `[plots]`.
+With `[run] output-dir = results` and `output = ESD_results.dat`, the program writes the following files under `results/`. Changing `output` changes the shared prefix. The figure path can also be set separately in `[plots]`.
 
 | File | Contents |
 | --- | --- |
-| `ESD_results.dat` | Measured tangential and cross ESD, uncertainties, and pair counts by radius |
-| `ESD_results_cov.dat` | Tangential ESD covariance in the same radial order as the measurement table. The header lists the zero-based rows used for the fit. |
-| `ESD_results_jackknife.dat` | Tangential and cross ESD with each sky region omitted in turn |
-| `ESD_results_fit.json` | Center, sample size, best-fit parameters, parameter intervals, and fit diagnostics |
+| `measurement/ESD_results.dat` | Measured tangential and cross ESD, uncertainties, and pair counts by radius |
+| `measurement/ESD_results_cov.dat` | Tangential ESD covariance in the same radial order as the measurement table. The header lists the zero-based rows used for the fit. |
+| `measurement/ESD_results_jackknife.dat` | Tangential and cross ESD with each sky region omitted in turn |
+| `measurement/ESD_results_fit_input.dat` | Self-contained input for a later five-parameter fit. It stores the fitted radial bins, tangential ESD, covariance submatrix, center, sample size, mean redshift, mean stellar mass, and cosmology. |
+| `ESD_results_fit.json` | Center, sample size, cosmology, best-fit parameters, parameter intervals, and fit diagnostics |
 | `ESD_results_chain.npz` | Retained parameter draws, measured values used in the fit, and their covariance |
 | `ESD_results_profiles.dat` | Best-fit values and uncertainty bands for every fitted component and the total curve |
 | `ESD_results_profile_draws.npz` | Saved draws of the individual curves. Draw indices identify the corresponding rows in the full parameter chain. |
 | `ESD_results_fit.png` | Measured tangential ESD, total best-fit curve, and 68% and 95% bands |
+
+`stage = measure` writes the files under `measurement/`. `stage = fit` reads the saved input and writes the fit products. Without `output-dir`, all files follow the parent directory of `output`.
 
 ## Measurement table
 

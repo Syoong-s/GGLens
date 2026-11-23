@@ -147,6 +147,7 @@ def finish_fit(problem, chain_bytes, stats_bytes, shape, paths, context):
     summary = {
         "fit_id": fit_id, "center": center, "n_fit_bins": problem.r.size, "n_lenses": context["n_lenses"],
         "n_jack": context["regions"], "effective_redshift": context["redshift"],
+        "cosmology": context["cosmology"],
         "fixed_mean_stellar_mass_Msun_over_h": problem.model.stellar_mass,
         "chi2": chi2, "degrees_of_freedom": int(dof), "best_chain_index": best_index,
         "steps_per_walker": steps + context["burn_in"], "burn_in_per_walker": context["burn_in"],

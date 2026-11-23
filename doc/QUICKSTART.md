@@ -12,6 +12,7 @@ Save a configuration file such as `esd.ini`. The example below uses a shear head
 [run]
 group-list = group_catalogs.list
 shear-list = shear_catalogs.list
+output-dir = results
 output = ESD_results.dat
 
 [measurement]
@@ -27,7 +28,7 @@ expo-chi2 = -1
 
 Omitted settings use their defaults. For a different lens layout, set positions in `[group_columns]`, `[galaxy_columns]`, and `[member_columns]`. The default group sample has redshifts from `0.3` up to but excluding `0.4` and catalog log masses from `13.0` up to but excluding `14.2`. Set `z-min`, `z-max`, `logm-min`, and `logm-max` in `[measurement]` to choose another sample. Set `[calibration] fd-corrected = true` if field distortion was already removed from the input shear values. [Lens column settings](CONFIGURATION.md#group-galaxy-and-member-columns)
 
-The default measurement uses 12 radial bins from `0.1` to `100.0` comoving Mpc divided by `h`, with automatic calibration enabled. The values set in the full INI example are the program defaults. To turn off a default cut, set its value below `-999.0`. [Full INI example](../esd.example.ini) · [Configuration guide](CONFIGURATION.md)
+The default measurement uses 12 radial bins from `0.1` to `100.0` comoving Mpc divided by `h`, with automatic calibration enabled. To turn off a default cut, set its value below `-999.0`. [Full INI example](../code/esd.example.ini) · [Configuration guide](CONFIGURATION.md)
 
 ## 3. Launch the program
 
@@ -45,4 +46,26 @@ mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi "/path/to/esd.ini
 
 Omit the INI argument to use `esd.ini` in the launch directory. If that file is absent, the program uses its built-in defaults. Relative paths inside the INI start from the launch directory.
 
-The figure and companion files are written beside the path set by `output`. Use a distinct output name for each sample or center you want to keep. [Result files](RESULTS.md)
+With the example settings, the ESD measurement files go in `results/measurement/`. The five-parameter fit tables, archives, and figure go in `results/`. Use a distinct `output` name or `output-dir` for each sample or fit you want to keep. [Result files](RESULTS.md)
+
+## 4. Run the stages separately
+
+Use `--stage` to override `[run] stage` for a launch. The fit command below reads the measurement saved by the first command and needs only its `*_fit_input.dat` file.
+
+```sh
+mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi --stage measure "/path/to/esd.ini"
+mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi --stage fit "/path/to/esd.ini"
+```
+
+To reuse the measurement in another output directory, make a fit-only INI and launch it with the same executable.
+
+```ini
+[run]
+stage = fit
+output-dir = refits/bcg
+
+[fit]
+input = results/measurement/ESD_results_fit_input.dat
+```
+
+The saved input supplies the measured radii, ESD, covariance, center, lens statistics, and cosmology. Set any sampling changes in `[fit]` and any figure changes in `[plots]`. For measurements from earlier versions, see how to pass the ESD table and its covariance. [Fit input settings](CONFIGURATION.md#fit-and-figure)

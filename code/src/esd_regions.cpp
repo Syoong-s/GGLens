@@ -114,6 +114,7 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     MPI_Allreduce(MPI_IN_PLACE, active.data(), static_cast<int>(active.size()),
                   MPI_UNSIGNED_CHAR, MPI_MAX, comm);
     LensStack stack;
+    auto &sample = stack.sample;
     stack.labels.assign(lenses.size(), -1);
     std::vector<Point> points;
     std::size_t reliable = 0;
@@ -122,22 +123,22 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
         if (!active[i]) continue;
         const auto &lens = lenses[i];
         points.push_back(bcg::sky_xyz(lens.ra, lens.dec));
-        stack.redshift += lens.z;
+        sample.redshift += lens.z;
         if (cfg.center == bcg::Center::bcg) {
-            stack.stellar_mass += lens.stellar_mass;
+            sample.stellar_mass += lens.stellar_mass;
             if (report_photometry) reliable += lens.photometry_select >= 1;
         }
     }
-    stack.n_lenses = points.size();
-    if (stack.n_lenses < 2) throw std::runtime_error("Jackknife needs at least two groups with usable pairs");
-    stack.stellar_mass *= cfg.h / stack.n_lenses; // Convert physical M_sun to h^-1 M_sun.
-    stack.redshift /= stack.n_lenses;
+    sample.n_lenses = points.size();
+    if (sample.n_lenses < 2) throw std::runtime_error("Jackknife needs at least two groups with usable pairs");
+    sample.stellar_mass *= cfg.cosmology.h / sample.n_lenses; // Convert physical M_sun to h^-1 M_sun.
+    sample.redshift /= sample.n_lenses;
 
-    const int requested = std::min(cfg.n_jack, static_cast<int>(stack.n_lenses));
+    const int requested = std::min(cfg.n_jack, static_cast<int>(sample.n_lenses));
     const auto labels = spherical_regions(points, requested, comm);
-    stack.regions = 1 + *std::max_element(labels.begin(), labels.end());
-    if (stack.regions < 2) throw std::runtime_error("Lens sky positions cannot form jackknife regions");
-    std::vector<int> counts(stack.regions);
+    sample.regions = 1 + *std::max_element(labels.begin(), labels.end());
+    if (sample.regions < 2) throw std::runtime_error("Lens sky positions cannot form jackknife regions");
+    std::vector<int> counts(sample.regions);
     std::size_t pos = 0;
     for (std::size_t i = 0; i < active.size(); ++i) {
         if (!active[i]) continue;
@@ -148,12 +149,12 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
     if (!rank) {
-        std::cout << "Combined " << bcg::center_name(cfg.center) << " stack: " << stack.n_lenses
-                  << " groups, mean z=" << stack.redshift;
+        std::cout << "Combined " << bcg::center_name(cfg.center) << " stack: " << sample.n_lenses
+                  << " groups, mean z=" << sample.redshift;
         if (report_photometry) std::cout << ", select>=1: " << reliable;
         if (cfg.center == bcg::Center::bcg)
-            std::cout << ", mean stellar mass [M_sun/h]=" << stack.stellar_mass;
-        std::cout << "\nJackknife regions: " << stack.regions << '/' << cfg.n_jack
+            std::cout << ", mean stellar mass [M_sun/h]=" << sample.stellar_mass;
+        std::cout << "\nJackknife regions: " << sample.regions << '/' << cfg.n_jack
                   << ", groups per region " << *bounds.first << " to " << *bounds.second << std::endl;
     }
     return stack;

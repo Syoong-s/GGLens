@@ -10,10 +10,11 @@ namespace bcg_esd {
 Result measure_bin(bcg::PairStore &pairs, double low, double high, const LensStack &stack,
                    const Config &cfg, MPI_Comm comm) {
     Result out;
+    const int regions = stack.sample.regions;
     out.low = low;
     out.high = high;
-    out.tangential_replicas.assign(stack.regions, out.measured);
-    out.cross_replicas.assign(stack.regions, out.measured);
+    out.tangential_replicas.assign(regions, out.measured);
+    out.cross_replicas.assign(regions, out.measured);
     MPI_Allreduce(&pairs.count, &out.count, 1, MPI_INT64_T, MPI_SUM, comm);
     if (out.count == 0) return out;
 
@@ -24,14 +25,14 @@ Result measure_bin(bcg::PairStore &pairs, double low, double high, const LensSta
 
     pairs.load_if_small(cfg.memory_bytes() / 2);
     const auto measure = [&](int component, double &full, std::vector<double> &replicas) {
-        const auto pdf = bcg::prepare_replica_pdf(pairs, stack.labels, stack.regions,
+        const auto pdf = bcg::prepare_replica_pdf(pairs, stack.labels, regions,
                                                   component, cfg.pdf_bins, comm);
         const auto estimates = bcg::fit_replica_pdf(pairs, stack.labels, component, pdf, comm);
         full = estimates[0];
         replicas.assign(estimates.begin() + 1, estimates.end());
         if (component == 0) {
             std::vector<std::int64_t> omitted;
-            for (int r = 0; r < stack.regions; ++r) omitted.push_back(out.count - pdf.kept[r + 1]);
+            for (int r = 0; r < regions; ++r) omitted.push_back(out.count - pdf.kept[r + 1]);
             int rank = 0;
             MPI_Comm_rank(comm, &rank);
             if (!rank) {
