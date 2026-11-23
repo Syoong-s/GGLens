@@ -1,5 +1,5 @@
 #pragma once
-#include "bcg_catalog.hpp"
+#include "bcg_dr9.hpp"
 
 namespace bcg {
 struct MemberRequest {
@@ -13,6 +13,6 @@ struct MemberPosition {
 
 // Send matched member positions to their request owners in bounded batches.
 void join_dr9_member_positions(
-    const std::string &path, const std::vector<MemberRequest> &requests, bool luminosity_weighted,
+    const std::string &path, const std::vector<MemberRequest> &requests, const GalaxyColumns &columns,
     const std::function<void(std::size_t, const MemberPosition &)> &accumulate, MPI_Comm comm);
 } // namespace bcg

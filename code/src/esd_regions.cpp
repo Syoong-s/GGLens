@@ -117,6 +117,7 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     stack.labels.assign(lenses.size(), -1);
     std::vector<Point> points;
     std::size_t reliable = 0;
+    const bool report_photometry = cfg.center == bcg::Center::bcg && cfg.lens_columns.galaxy.photometry_select != 0;
     for (std::size_t i = 0; i < lenses.size(); ++i) {
         if (!active[i]) continue;
         const auto &lens = lenses[i];
@@ -124,7 +125,7 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
         stack.redshift += lens.z;
         if (cfg.center == bcg::Center::bcg) {
             stack.stellar_mass += lens.stellar_mass;
-            reliable += lens.photometry_select >= 1;
+            if (report_photometry) reliable += lens.photometry_select >= 1;
         }
     }
     stack.n_lenses = points.size();
@@ -149,8 +150,9 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     if (!rank) {
         std::cout << "Combined " << bcg::center_name(cfg.center) << " stack: " << stack.n_lenses
                   << " groups, mean z=" << stack.redshift;
+        if (report_photometry) std::cout << ", select>=1: " << reliable;
         if (cfg.center == bcg::Center::bcg)
-            std::cout << ", select>=1: " << reliable << ", mean stellar mass [M_sun/h]=" << stack.stellar_mass;
+            std::cout << ", mean stellar mass [M_sun/h]=" << stack.stellar_mass;
         std::cout << "\nJackknife regions: " << stack.regions << '/' << cfg.n_jack
                   << ", groups per region " << *bounds.first << " to " << *bounds.second << std::endl;
     }

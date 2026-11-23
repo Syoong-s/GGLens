@@ -48,13 +48,29 @@ std::vector<CatalogTriple> read_group_manifest(const std::string &path) {
 
 // ==========================================
 // Function: catalog_fingerprint
-// Method: Invalidate a selected-lens cache whenever center, input identity or cuts change.
+// Method: Invalidate the cache when the center, cuts, input files or layout change.
 // ==========================================
 std::string catalog_fingerprint(const std::vector<CatalogTriple> &triples,
-                                double zmin, double zmax, double mmin, double mmax, Center center) {
+                                double zmin, double zmax, double mmin, double mmax, Center center,
+                                const LensColumns &columns) {
     std::ostringstream out;
-    out << std::setprecision(17) << "DR9_LENSES_V2|" << center_name(center) << '|' << zmin << '|' << zmax
+    out << std::setprecision(17) << "DR9_LENSES_V3|" << center_name(center) << '|' << zmin << '|' << zmax
         << '|' << mmin << '|' << mmax;
+    const auto write_format = [&out](const char *name, const CatalogTextFormat &text) {
+        out << '|' << name << ':' << static_cast<int>(text.delimiter) << ':' << text.header;
+    };
+    const auto &[group, galaxy, member] = columns;
+    write_format("group", group.text);
+    out << ':' << group.id << ':' << group.redshift << ':' << group.halo_mass
+        << ':' << static_cast<int>(group.mass_format);
+    write_format("galaxy", galaxy.text);
+    out << ':' << galaxy.id << ':' << galaxy.ra << ':' << galaxy.dec << ':' << galaxy.luminosity;
+    write_format("member", member.text);
+    out << ':' << member.galaxy_id << ':' << member.group_id;
+    if (center == Center::bcg) {
+        out << "|bcg:" << galaxy.stellar_mass << ':' << static_cast<int>(galaxy.mass_format)
+            << ':' << galaxy.photometry_select << ':' << member.brightest << ':' << member.brightest_value;
+    }
     for (const auto &triple : triples) {
         out << "|block:" << triple.id;
         for (const auto &p : {triple.group, triple.galaxy, triple.member})

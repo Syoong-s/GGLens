@@ -27,6 +27,29 @@ Pass the configuration file path as the sole argument to `esd_bcg_mpi`. With no 
 
 Use matching cosmology settings when comparing samples. The defaults are `omega-m` at `0.315`, `h` at `0.674`, `sigma8` at `0.811`, `omega-b-h2` at `0.02237`, `spectral-index` at `0.965`, and `neutrino-mass` at `0.06` eV. The program generates its fit inputs from these settings.
 
+## Group, Galaxy, and Member columns
+
+Positions are one-based in all three sections. Negative positions count backward, with `-1` for the last column. The defaults match the DR9 layout. A position is checked at startup when the selected center uses it.
+
+| Section | Key | Default | Value in the column |
+| --- | --- | ---: | --- |
+| `[group_columns]` | `id` | `1` | Positive Group ID. Set `0` to use the data row number. |
+| `[group_columns]` | `redshift` | `5` | Group redshift. |
+| `[group_columns]` | `log-halo-mass` | `6` | Group halo mass in the representation set by `mass-format`. |
+| `[galaxy_columns]` | `id` | `1` | Nonnegative Galaxy ID. Set `0` to use the data row number. |
+| `[galaxy_columns]` | `ra`, `dec` | `2`, `3` | Galaxy coordinates in degrees. |
+| `[galaxy_columns]` | `luminosity` | `6` | Positive luminosity for LWC. |
+| `[galaxy_columns]` | `log-stellar-mass` | `10` | BCG stellar mass in the representation set by `mass-format`. |
+| `[galaxy_columns]` | `photometry-select` | `15` | BCG photometry selection code for the run log. Set `0` to omit the statistic. |
+| `[member_columns]` | `galaxy-id`, `group-id` | `1`, `2` | IDs used to join each Member row to the Galaxy and Group tables. |
+| `[member_columns]` | `brightest-flag` | `3` | BCG flag column. A selected group needs exactly one row whose flag equals `brightest-value`. |
+
+Each section accepts `delimiter = whitespace` (default), `comma`, or `tab`. Set `header = true` to skip the first physical line of every file of that type. The default is `false`. Blank lines and lines beginning with `#` after optional whitespace are skipped in either case.
+
+`[group_columns]` and `[galaxy_columns]` accept `mass-format = log10` (default) or `linear`. Group masses are in solar masses divided by `h` and enter the sample cuts as `log10` values. Galaxy stellar masses are in physical solar masses and enter the BCG stack as linear values. `[member_columns]` accepts an integer `brightest-value`, default `1`.
+
+For `id = 0`, numbering starts at `1` in each file and counts every data record, including rows that fail a selection cut. The Member table uses these IDs in its configured join columns. [Input layouts and example](INPUTS.md#group-galaxy-and-member-catalogs)
+
 ## Shear column positions
 
 Set each applicable key in `[external_columns]` to its one-based position in the shear catalogs.

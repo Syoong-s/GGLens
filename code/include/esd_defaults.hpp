@@ -22,6 +22,13 @@ inline constexpr double omega_m = 0.315, h = 0.674, sigma8 = 0.811;
 inline constexpr double omega_b_h2 = 0.02237, spectral_index = 0.965, neutrino_mass = 0.06;
 inline constexpr int n_r_bins = 12, n_jack = 400, pdf_bins = 4;
 
+// DR9 positions are one-based for all three tables.
+inline constexpr bcg::LensColumns lens_columns{
+    {1, 5, 6, {}},
+    {1, 2, 3, 6, 10, 15, {}},
+    {1, 2, 3, {}}
+};
+
 // FD restoration and Cartesian calibration
 inline constexpr bool fd_corrected = false, self_calibrate = true;
 inline constexpr int selfcal_fd_bins = 21, selfcal_pdf_bins = 4, selfcal_min_count = 6;

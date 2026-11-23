@@ -32,6 +32,7 @@ struct Config {
     std::string fit_plot = defaults::fit_plot, plot_title = defaults::plot_title;
     std::string covariance_output, replica_output, summary_output, chain_output;
     std::string profile_output, profile_draws_output;
+    bcg::LensColumns lens_columns = defaults::lens_columns;
     bcg::ExternalColumns external_columns = defaults::external_columns;
     bcg::Cuts cuts{defaults::cuts, defaults::excluded_ccds};
     bcg::ShearCalibration calibration = defaults::calibration;

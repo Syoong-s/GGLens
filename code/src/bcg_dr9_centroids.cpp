@@ -10,7 +10,7 @@ namespace {
 // Function: read_member_requests
 // Method: Resolve Group IDs within one catalog block and retain all selected memberships.
 // ==========================================
-void read_member_requests(const CatalogTriple &triple, const std::vector<Lens> &lenses,
+void read_member_requests(const CatalogTriple &triple, const MemberColumns &columns, const std::vector<Lens> &lenses,
                           std::vector<MemberRequest> &requests, MPI_Comm comm) {
     std::unordered_map<std::int64_t, std::size_t> groups;
     for (std::size_t i = 0; i < lenses.size(); ++i) {
@@ -20,9 +20,9 @@ void read_member_requests(const CatalogTriple &triple, const std::vector<Lens> &
     }
     if (groups.empty()) return;
 
-    read_dr9_range(triple.member, comm, [&](Dr9Fields row) {
-        const auto galaxy_id = row.number<std::int64_t>();
-        const auto group_id = row.number<std::int64_t>();
+    read_dr9_range(triple.member, columns.text, comm, [&](Dr9Fields &row, std::int64_t) {
+        const auto galaxy_id = row.number<std::int64_t>(columns.galaxy_id);
+        const auto group_id = row.number<std::int64_t>(columns.group_id);
         const auto it = groups.find(group_id);
         if (it == groups.end()) return;
         if (galaxy_id < 0)
@@ -40,7 +40,7 @@ void assign_centroid(Lens &lens, const std::array<double, 4> &sum) {
     const auto [x, y, z, weight] = sum;
     const double norm = std::hypot(x, y, z);
     if (!(weight > 0 && std::isfinite(weight) && norm > 1e-12 * weight && std::isfinite(norm)))
-        throw std::runtime_error("Undefined DR9 centroid for group " + std::to_string(lens.id) +
+        throw std::runtime_error("Undefined centroid for group " + std::to_string(lens.id) +
                                  " in block " + std::to_string(lens.catalog_id));
     lens.ra = std::atan2(y, x) / deg;
     if (lens.ra < 0) lens.ra += 360;
@@ -53,8 +53,8 @@ void assign_centroid(Lens &lens, const std::array<double, 4> &sum) {
 // Function: resolve_dr9_centroids
 // Method: Reduce spherical member sums across ranks and resolve one center per selected group.
 // ==========================================
-void resolve_dr9_centroids(const std::vector<CatalogTriple> &triples,
-                           std::vector<Lens> &lenses, Center center, MPI_Comm comm) {
+void resolve_dr9_centroids(const std::vector<CatalogTriple> &triples, const LensColumns &columns,
+                           std::vector<Lens> &lenses, MPI_Comm comm) {
     std::map<std::string, std::vector<const CatalogTriple *>> by_galaxy_file;
     for (const auto &triple : triples) by_galaxy_file[triple.galaxy].push_back(&triple);
 
@@ -63,8 +63,8 @@ void resolve_dr9_centroids(const std::vector<CatalogTriple> &triples,
         throw std::runtime_error("DR9 centroid sums exceed MPI count limits");
     for (const auto &[path, blocks] : by_galaxy_file) {
         std::vector<MemberRequest> requests;
-        for (const auto *triple : blocks) read_member_requests(*triple, lenses, requests, comm);
-        join_dr9_member_positions(path, requests, center == Center::lwc,
+        for (const auto *triple : blocks) read_member_requests(*triple, columns.member, lenses, requests, comm);
+        join_dr9_member_positions(path, requests, columns.galaxy,
             [&](std::size_t i, const MemberPosition &member) {
                 const auto position = sky_xyz(member.ra, member.dec);
                 for (int j = 0; j < 3; ++j) sums[i][j] += member.weight * position[j];

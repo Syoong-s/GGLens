@@ -80,19 +80,15 @@ public:
 
 // ==========================================
 // Function: read_position
-// Method: Read coordinates and, for LWC, the z-band luminosity from the selected Galaxy row.
+// Method: Read coordinates and, for LWC, the configured luminosity from the selected Galaxy row.
 // ==========================================
-MemberPosition read_position(Dr9Fields &row, std::int64_t id, bool luminosity_weighted) {
-    MemberPosition position{row.number<double>(), row.number<double>(), 1.0};
-    if (luminosity_weighted) {
-        row.take(); // Redshift.
-        row.take(); // z-band absolute magnitude.
-        position.weight = row.number<double>();
-    }
+MemberPosition read_position(Dr9Fields &row, std::int64_t id, const GalaxyColumns &columns) {
+    MemberPosition position{row.number<double>(columns.ra), row.number<double>(columns.dec), 1.0};
+    if (columns.luminosity != 0) position.weight = row.number<double>(columns.luminosity);
     if (!(position.ra >= 0 && position.ra < 360 && position.dec >= -90 && position.dec <= 90))
-        throw std::runtime_error("Invalid DR9 coordinates for Galaxy ID " + std::to_string(id));
+        throw std::runtime_error("Invalid coordinates for Galaxy ID " + std::to_string(id));
     if (!(position.weight > 0 && std::isfinite(position.weight)))
-        throw std::runtime_error("LWC requires positive z-band luminosity for Galaxy ID " + std::to_string(id));
+        throw std::runtime_error("LWC requires positive luminosity for Galaxy ID " + std::to_string(id));
     return position;
 }
 } // namespace
@@ -102,7 +98,7 @@ MemberPosition read_position(Dr9Fields &row, std::int64_t id, bool luminosity_we
 // Method: Route requests once, then consume matching rows during a single parallel galaxy scan.
 // ==========================================
 void join_dr9_member_positions(
-    const std::string &path, const std::vector<MemberRequest> &requests, bool luminosity_weighted,
+    const std::string &path, const std::vector<MemberRequest> &requests, const GalaxyColumns &columns,
     const std::function<void(std::size_t, const MemberPosition &)> &accumulate, MPI_Comm comm) {
     int rank = 0, ranks = 1;
     MPI_Comm_rank(comm, &rank);
@@ -123,8 +119,10 @@ void join_dr9_member_positions(
         }
     }
 
-    if (!rank) std::cout << "DR9 Galaxy parallel scan: " << path << std::endl;
-    Dr9Rows input(path, comm);
+    if (!rank) std::cout << "Galaxy parallel scan: " << path << std::endl;
+    const auto offset = galaxy_row_offset(path, columns, comm);
+    Dr9Rows input(path, columns.text.header, comm);
+    Dr9Fields row(path, columns.text.delimiter);
     std::string line;
     bool exhausted = false;
     std::vector<std::vector<GalaxyPosition>> outgoing(ranks);
@@ -133,10 +131,10 @@ void join_dr9_member_positions(
         int selected = 0;
         for (int i = 0; i < batch_rows && !exhausted; ++i) {
             if (!input.next(line)) { exhausted = true; break; }
-            Dr9Fields row(line, path);
-            const auto id = row.number<std::int64_t>();
+            row.reset(line);
+            const auto id = columns.id == 0 ? offset + input.row_number() : row.number<std::int64_t>(columns.id);
             if (!ids.contains(id)) continue;
-            const auto position = read_position(row, id, luminosity_weighted);
+            const auto position = read_position(row, id, columns);
             outgoing[owner(id, ranks)].push_back({id, position});
             selected = 1;
         }

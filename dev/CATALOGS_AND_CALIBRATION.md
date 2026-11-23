@@ -1,18 +1,18 @@
 # Catalogs and calibration
 
-## DR9 joins
+## Lens catalog joins
 
-The manifest scopes selected groups by `(block ID, Group ID)`. Rank 0 resolves catalog paths against the manifest directory, canonicalizes them, and sends the resolved manifest to the other ranks. The Group scan applies half-open redshift and catalog-mass limits. It retains Group ID, group redshift, and the selection mass. The selected groups are gathered before resolving coordinates.
+The manifest scopes selected groups by `(block ID, Group ID)`. Rank 0 resolves catalog paths against the manifest directory and broadcasts the widths from the first data row of the first Group, Galaxy, and Member files. Each rank resolves the active column positions once. The Group scan applies half-open redshift and catalog-mass limits. It retains Group ID, group redshift, and the selection mass. The selected groups are gathered before resolving coordinates. [Column resolution](../code/src/bcg_dr9_rows.cpp)
 
-`Dr9Rows` assigns a row to the rank whose byte interval contains the row's start. It keeps the first row after a newline and skips a leading fragment when the boundary cuts through a row. A rank can finish a row beyond its upper boundary. The reader skips blank lines and comments and handles an unterminated final row. IDs are parsed as integers from the records.
+`Dr9Rows` assigns a row to the rank whose byte interval contains the row's start. It keeps the first row after a newline and skips a leading fragment when the boundary cuts through a row. A rank can finish a row beyond its upper boundary. The reader skips the configured header, blank lines, and comments and handles an unterminated final row. It finds and parses required fields on demand using the common layout. Explicit IDs use 64-bit integer parsing. Row-based Group IDs use an exclusive MPI prefix sum after the selection scan. Row-based Galaxy IDs use a count pass over the byte ranges preceding the last rank so that matches can use full-file row numbers during the Galaxy scan.
 
-For BCG, each block matches exactly one Member row with brightest flag `1` per selected group. Requests are merged by canonical Galaxy path, including paths shared by NGC and SGC. Ranks read the corresponding explicit Galaxy IDs and gather the matching positions, photometric codes, and linear stellar masses computed as `10**log_stellar_mass`.
+For BCG, each block matches exactly one Member row with the configured brightest value per selected group. Requests are merged by canonical Galaxy path, including paths shared by NGC and SGC. Ranks gather the matching positions, configured photometry codes, and stellar masses converted to linear physical solar masses.
 
 For LWC and NWC, every selected Member row contributes a Galaxy ID and the index of its group in the common lens table. For each unique Galaxy path, an exact shared ID selection uses a dense bitmap for suitable ID spans or a sparse set for wide spans. Requests are distributed by `Galaxy ID % number_of_ranks`. During the scan, workers route only matching positions to these owners, using batches of up to 262,144 data rows per reader. Owners detect missing or repeated IDs and accumulate group sums. MPI reduces the sums and every rank resolves the same centers.
 
-For a member at right ascension $a$ and declination $d$, the sky vector is $\hat{n}=(\cos d\cos a,\cos d\sin a,\sin d)$. LWC uses the Galaxy catalog's column 5 luminosity as the positive weight in $\sum_i w_i\hat{n}_i$. NWC uses unit weights. Convert the summed direction to RA with `atan2(y,x)` and to Dec with `atan2(z,hypot(x,y))`. Wrap RA to `[0, 360)`. A group with no well-defined direction raises an error.
+For a member at right ascension $a$ and declination $d$, the sky vector is $\hat{n}=(\cos d\cos a,\cos d\sin a,\sin d)$. LWC uses the configured Galaxy luminosity as the positive weight in $\sum_i w_i\hat{n}_i$. NWC uses unit weights. Convert the summed direction to RA with `atan2(y,x)` and to Dec with `atan2(z,hypot(x,y))`. Wrap RA to `[0, 360)`. A group with no well-defined direction raises an error.
 
-The `DR9_LENSES_V2` cache key includes the center, selection limits, block IDs, and input paths, sizes, and modification times. Rank 0 checks row counts and mode-specific data, then broadcasts a valid lens table. Cache misses write a complete replacement through a unique temporary directory on the same filesystem. [Manifest and cache](../src/bcg_dr9_manifest.cpp) · [Lens loading](../src/esd_lenses.cpp) · [Centroids](../src/bcg_dr9_centroids.cpp)
+The `DR9_LENSES_V3` cache key includes the resolved positions, text formats, and field conventions used by the selected center, along with the selection limits, block IDs, and input paths, sizes, and modification times. Rank 0 checks cached row counts and mode-specific data, then broadcasts a valid lens table. Cache misses write a complete replacement through a unique temporary directory on the same filesystem. [Manifest and cache](../code/src/bcg_dr9_manifest.cpp) · [Lens loading](../code/src/esd_lenses.cpp) · [Centroids](../code/src/bcg_dr9_centroids.cpp)
 
 ## Source schema and cuts
 
@@ -22,7 +22,7 @@ Each source file is assigned by list position modulo the number of source worker
 
 Scalar cuts use `threshold >= -999.0` as the enable condition. Map each new named field in the first-header reader and tie its read dependency to the same cut predicate used by the row selector.
 
-The CCD cut uses a sorted, deduplicated vector of IDs. An active list requires the configured one-based CCD column. The selector rounds that value to the nearest integer, with ties away from zero as in Fortran's `NINT`, and drops listed IDs before star-bar fitting and pair collection. The same selected rows feed both the FD calibration and the ESD measurement. Set `excluded_ccds` and `external_columns.ccd_num` to change the compiled defaults. [Defaults](../include/esd_defaults.hpp)
+The CCD cut uses a sorted, deduplicated vector of IDs. An active list requires the configured one-based CCD column. The selector rounds that value to the nearest integer, with ties away from zero as in Fortran's `NINT`, and drops listed IDs before star-bar fitting and pair collection. The same selected rows feed both the FD calibration and the ESD measurement. Set `excluded_ccds` and `external_columns.ccd_num` to change the compiled defaults. [Defaults](../code/include/esd_defaults.hpp)
 
 The source quantities defined by the selector are
 
@@ -34,13 +34,13 @@ $$
 
 where $A$ is `half_light_area`. The relative size, selected magnitude, and SNR enter the star-bar stage. The exposure variant also uses a near-integer exposure ID between 1 and 10,000,000.
 
-The older 44-column source layout placed external RA, Dec, photo-z, and i-band magnitude at columns 5, 6, 17, and 11. Its last column carried exposure chi-squared. The header rule is independent of width, and an enabled exposure star-bar cut needs the actual exposure ID position in the INI. [Header mapping](../src/bcg_shear_catalog.cpp) · [Cut logic](../src/bcg_shear_cuts.cpp)
+The older 44-column source layout placed external RA, Dec, photo-z, and i-band magnitude at columns 5, 6, 17, and 11. Its last column carried exposure chi-squared. The header rule is independent of width, and an enabled exposure star-bar cut needs the actual exposure ID position in the INI. [Header mapping](../code/src/bcg_shear_catalog.cpp) · [Cut logic](../code/src/bcg_shear_cuts.cpp)
 
 ## Star-bar selection
 
 Fit the star bar after duplicate and simple row cuts. The size histogram uses 100 bins of width 0.04 over `[-2, 2)`. The magnitude histogram uses 20 unit bins starting at 10, with the reference's truncation convention. In the global mode, choose the strongest three-bin concentration in the permitted size range among magnitude bins with at least 100 rows. Collect nearby peaks within 0.05 in size and concentration of at least 0.6. Estimate the center and sample scatter using rows within 0.1 of the initial peak. The cut is the mean plus the configured multiplier times the scatter, with the code's fallback threshold when the peak or scatter estimate is insufficient. Global rejection removes rows at or below the cutoff when SNR is positive.
 
-Per-exposure fitting uses its own size window around `[-0.5, 0.2]` when selecting peaks. The peak and mean stages use SNR above 40. Three clipping passes update the means and scatter, with a width floor of 0.005 on the scatter. The scatter stage uses positive SNR. Exposure IDs are collected with a bitmap, and the fits are evaluated in bounded batches. Failed exposures use the mean and scatter averaged over successful exposure fits, or the fixed fallback of 0.5 and 0.05 if every fit fails. The per-exposure cut takes precedence when enabled. It removes rows at or below the threshold for their exposure. [Star-bar code](../src/bcg_star_bar.cpp)
+Per-exposure fitting uses its own size window around `[-0.5, 0.2]` when selecting peaks. The peak and mean stages use SNR above 40. Three clipping passes update the means and scatter, with a width floor of 0.005 on the scatter. The scatter stage uses positive SNR. Exposure IDs are collected with a bitmap, and the fits are evaluated in bounded batches. Failed exposures use the mean and scatter averaged over successful exposure fits, or the fixed fallback of 0.5 and 0.05 if every fit fails. The per-exposure cut takes precedence when enabled. It removes rows at or below the threshold for their exposure. [Star-bar code](../code/src/bcg_star_bar.cpp)
 
 ## Field distortion
 
@@ -64,4 +64,4 @@ G_{2,\rm final} &= \frac{G_{2,\rm raw}-c_2B_2}{1+m_2}-gf_2B_2+gf_1h_2.
 \end{aligned}
 $$
 
-The reported ESD errors condition on these fixed coefficients. The ESD header gives the effective coefficients and, when enabled, the calibration range and union size. [Restoration and correction](../include/bcg_calibration.hpp) · [FD line fit](../src/selfcalibration.cpp) · [FD sign solver](../src/selfcal_pdf.cpp)
+The reported ESD errors condition on these fixed coefficients. The ESD header gives the effective coefficients and, when enabled, the calibration range and union size. [Restoration and correction](../code/include/bcg_calibration.hpp) · [FD line fit](../code/src/selfcalibration.cpp) · [FD sign solver](../code/src/selfcal_pdf.cpp)

@@ -37,7 +37,9 @@ std::vector<int> parse_ccd_cut(const std::string &input) {
 // Method: Overlay typed INI keys on compiled defaults and report invalid keys at their line.
 // ==========================================
 void apply_ini(Config &c, const std::string &text) {
-    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *, std::vector<int> *>;
+    using Setting = std::variant<std::string *, double *, int *, bool *, bcg::Center *, std::vector<int> *,
+                                 bcg::CatalogDelimiter *, bcg::MassFormat *>;
+    auto &[group, galaxy, member] = c.lens_columns;
     const std::unordered_map<std::string, Setting> settings{
         {"run.group-list", &c.group_list},
         {"run.shear-list", &c.shear_list},
@@ -62,6 +64,27 @@ void apply_ini(Config &c, const std::string &text) {
         {"measurement.n-r-bins", &c.n_r_bins},
         {"measurement.n-jack", &c.n_jack},
         {"measurement.pdf-bins", &c.pdf_bins},
+        {"group_columns.id", &group.id},
+        {"group_columns.redshift", &group.redshift},
+        {"group_columns.log-halo-mass", &group.halo_mass},
+        {"group_columns.delimiter", &group.text.delimiter},
+        {"group_columns.header", &group.text.header},
+        {"group_columns.mass-format", &group.mass_format},
+        {"galaxy_columns.id", &galaxy.id},
+        {"galaxy_columns.ra", &galaxy.ra},
+        {"galaxy_columns.dec", &galaxy.dec},
+        {"galaxy_columns.luminosity", &galaxy.luminosity},
+        {"galaxy_columns.log-stellar-mass", &galaxy.stellar_mass},
+        {"galaxy_columns.photometry-select", &galaxy.photometry_select},
+        {"galaxy_columns.delimiter", &galaxy.text.delimiter},
+        {"galaxy_columns.header", &galaxy.text.header},
+        {"galaxy_columns.mass-format", &galaxy.mass_format},
+        {"member_columns.galaxy-id", &member.galaxy_id},
+        {"member_columns.group-id", &member.group_id},
+        {"member_columns.brightest-flag", &member.brightest},
+        {"member_columns.brightest-value", &member.brightest_value},
+        {"member_columns.delimiter", &member.text.delimiter},
+        {"member_columns.header", &member.text.header},
         {"calibration.fd-corrected", &c.fd_corrected},
         {"calibration.self-calibrate", &c.self_calibrate},
         {"calibration.m1", &c.calibration.m1},
@@ -111,7 +134,8 @@ void apply_ini(Config &c, const std::string &text) {
         {"plots.title", &c.plot_title},
     };
     const std::unordered_set<std::string> sections{
-        "run", "measurement", "calibration", "external_columns", "cuts", "fit", "plots"
+        "run", "measurement", "group_columns", "galaxy_columns", "member_columns",
+        "calibration", "external_columns", "cuts", "fit", "plots"
     };
     std::unordered_set<std::string> seen;
     std::istringstream input(text);
@@ -149,6 +173,15 @@ void apply_ini(Config &c, const std::string &text) {
                     *dest = parse_ccd_cut(value);
                 } else if constexpr (std::is_same_v<T, bcg::Center>) {
                     *dest = bcg::parse_center(value);
+                } else if constexpr (std::is_same_v<T, bcg::CatalogDelimiter>) {
+                    if (value == "whitespace") *dest = bcg::CatalogDelimiter::whitespace;
+                    else if (value == "comma") *dest = bcg::CatalogDelimiter::comma;
+                    else if (value == "tab") *dest = bcg::CatalogDelimiter::tab;
+                    else throw std::invalid_argument("expected whitespace, comma or tab");
+                } else if constexpr (std::is_same_v<T, bcg::MassFormat>) {
+                    if (value == "log10") *dest = bcg::MassFormat::log10;
+                    else if (value == "linear") *dest = bcg::MassFormat::linear;
+                    else throw std::invalid_argument("expected log10 or linear");
                 } else if constexpr (std::is_same_v<T, bool>) {
                     if (value == "true" || value == "1") *dest = true;
                     else if (value == "false" || value == "0") *dest = false;

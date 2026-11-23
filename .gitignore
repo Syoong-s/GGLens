@@ -1,6 +1,6 @@
 # Build and package artifacts
-/build/
-/esd_bcg_mpi
+/code/build/
+/code/esd_bcg_mpi
 /FQ_GGLens-v*.tar.gz
 __pycache__/
 *.py[cod]

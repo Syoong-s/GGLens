@@ -1,8 +1,8 @@
 # Input catalogs
 
-Set `group-list` and `shear-list` in the `[run]` section. Use plain-text lists and whitespace-separated catalog records.
+Set `group-list` and `shear-list` in the `[run]` section. Use plain-text lists and one record per line in the catalog files.
 
-## DR9 Group, Galaxy, and Member catalogs
+## Group, Galaxy, and Member catalogs
 
 The group list starts with the header shown below. Each block has four lines in order. Give it a unique positive number, followed by the Group, Galaxy, and Member paths. Resolve relative paths from the list's directory. Multiple blocks can use the same Galaxy file.
 
@@ -18,26 +18,43 @@ catalogs/DESIDR9_galaxy
 catalogs/iDESIDR9_SGC_1
 ```
 
-The program accept input in DR9 format (See [DR9 Format](dr9.md)). The tables below list the columns required by the program. Group IDs are local to a block. Galaxy ID `0` is valid.
+Set positions in `[group_columns]`, `[galaxy_columns]`, and `[member_columns]`. Each catalog type can have its own column count, order, and delimiter. Rank 0 reads the first data row of the first file of each type to establish the three widths. Every file and data row of a given type must use that layout. [Column settings and DR9 defaults](CONFIGURATION.md#group-galaxy-and-member-columns) · [Original DR9 layout](dr9.md)
 
-| Catalog | Column, starting at 1 | Required value |
-| --- | ---: | --- |
-| Group | 1 | Group ID |
-| Group | 5 | Group redshift |
-| Group | 6 | Base-10 logarithm of the catalog halo mass in solar masses divided by `h` |
-| Member | 1 | Galaxy ID from the Galaxy catalog |
-| Member | 2 | Group ID from the Group catalog |
-| Member | 3 | Brightest-member flag. BCG selection uses the member marked `1`. |
+With `delimiter = comma`, a field can be double-quoted and can contain commas and escaped double quotes on a single line. Comma and tab separators preserve empty fields, so unused empty columns keep their positions. A required numeric field must contain a number.
 
-| Galaxy column, starting at 0 | Required value | Center |
-| ---: | --- | --- |
-| 0 | Galaxy ID | All |
-| 1, 2 | Right ascension and declination in degrees | All |
-| 5 | Positive, K-corrected `z`-band luminosity | LWC |
-| 9 | Base-10 logarithm of stellar mass in solar masses | BCG |
-| 14 | Photometry selection code | BCG |
+Group IDs are local to the block, and explicit Galaxy ID `0` is valid. With `id = 0` in a Group or Galaxy section, the first data record of each file has ID `1`. The configured header, comments, and blank lines do not receive IDs. Member records use the resulting numbers to reference those files.
 
 Keep all member rows for LWC and NWC. For BCG, each selected group needs exactly one brightest-member row. Every required member must have a matching Galaxy ID.
+
+For a BCG run with headered CSV files, the following settings map a Group file with `redshift,halo_mass` and a Galaxy file with `ra,dec,stellar_mass`. Both store linear masses. The Member file has `galaxy_id,group_id,central`, with `7` marking its brightest members.
+
+```ini
+[group_columns]
+id = 0
+redshift = 1
+log-halo-mass = 2
+mass-format = linear
+delimiter = comma
+header = true
+
+[galaxy_columns]
+id = 0
+ra = 1
+dec = 2
+log-stellar-mass = 3
+photometry-select = 0
+mass-format = linear
+delimiter = comma
+header = true
+
+[member_columns]
+galaxy-id = 1
+group-id = 2
+brightest-flag = 3
+brightest-value = 7
+delimiter = comma
+header = true
+```
 
 ## Shear catalogs
 
