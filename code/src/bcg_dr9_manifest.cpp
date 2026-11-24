@@ -1,3 +1,4 @@
+#include "bcg_archive.hpp"
 #include "bcg_dr9.hpp"
 
 namespace bcg {
@@ -80,70 +81,107 @@ std::string catalog_fingerprint(const std::vector<CatalogTriple> &triples,
     return out.str();
 }
 
-// ==========================================
-// Function: read_lens_cache
-// Method: Load complete selected lens centers only when the fingerprint agrees.
-// ==========================================
+namespace {
+constexpr char cache_magic[] = "FQELENS1";
+
+std::vector<Lens> read_binary_cache(const std::string &path, const std::string &key, Center center) {
+    archive::Reader in(path);
+    char prefix[sizeof(cache_magic) - 1];
+    in.read(prefix, sizeof(prefix));
+    if (std::string(prefix, sizeof(prefix)) != cache_magic || in.get<std::uint64_t>() != key.size()) return {};
+    std::string stored(key.size(), '\0');
+    in.read(stored.data(), stored.size());
+    if (stored != key) return {};
+    const auto n = in.get<std::uint32_t>();
+    const auto record_size = center == Center::bcg ? 64ULL : 44ULL;
+    if (n == 0 || n > std::numeric_limits<int>::max() / sizeof(Lens) ||
+        in.remaining() != record_size*n + sizeof(std::uint64_t)) return {};
+    std::vector<Lens> lenses(n);
+    for (auto &lens : lenses) {
+        lens.catalog_id = in.get<std::int32_t>();
+        lens.id = in.get<std::int64_t>();
+        lens.ra = in.get<double>();
+        lens.dec = in.get<double>();
+        lens.z = in.get<double>();
+        lens.log_mh = in.get<double>();
+        if (center == Center::bcg) {
+            lens.galaxy_id = in.get<std::int64_t>();
+            lens.stellar_mass = in.get<double>();
+            lens.photometry_select = in.get<std::int32_t>();
+        }
+    }
+    in.verify();
+    return lenses;
+}
+
+std::vector<Lens> read_text_cache(const std::string &path, const std::string &key) {
+    std::ifstream in(path);
+    std::string stored;
+    if (!std::getline(in, stored) || stored != key) return {};
+    std::size_t n = 0;
+    if (!(in >> n) || n == 0 || n > std::numeric_limits<int>::max() / sizeof(Lens)) return {};
+    std::vector<Lens> lenses(n);
+    for (auto &lens : lenses)
+        if (!(in >> lens.catalog_id >> lens.id >> lens.ra >> lens.dec >> lens.z >> lens.log_mh
+                 >> lens.galaxy_id >> lens.stellar_mass >> lens.photometry_select)) return {};
+    in >> std::ws;
+    if (!in.eof() || in.bad()) return {};
+    return lenses;
+}
+} // namespace
+
 bool read_lens_cache(const std::string &path, const std::string &key,
                      const std::vector<CatalogTriple> &triples, Center center,
                      std::vector<Lens> &lenses) {
-    if (path.empty() || !fs::exists(path)) return false;
-    std::ifstream in(path);
-    std::string stored;
-    if (!std::getline(in, stored) || stored != key) return false;
-    std::size_t n = 0;
-    if (!(in >> n) || n == 0 || n > std::numeric_limits<int>::max() / sizeof(Lens)) return false;
+    if (path.empty() || !fs::is_regular_file(path)) return false;
+    std::vector<Lens> cached;
+    try {
+        cached = archive::has_magic(path, cache_magic) ? read_binary_cache(path, key, center) :
+                                                       read_text_cache(path, key);
+    } catch (const std::runtime_error &) {
+        return false;
+    }
+    if (cached.empty()) return false;
     std::unordered_set<int> valid_ids;
     for (const auto &triple : triples) valid_ids.insert(triple.id);
-    std::vector<Lens> temp(n);
-    for (auto &v : temp) {
-        if (!(in >> v.catalog_id >> v.id >> v.ra >> v.dec >> v.z >> v.log_mh
-                  >> v.galaxy_id >> v.stellar_mass >> v.photometry_select)) return false;
-        if (!valid_ids.count(v.catalog_id) || v.id <= 0 ||
-            !std::isfinite(v.ra) || !std::isfinite(v.dec) ||
-            !std::isfinite(v.z) || !std::isfinite(v.log_mh) ||
-            v.ra < 0 || v.ra >= 360 || v.dec < -90 || v.dec > 90) return false;
+    for (const auto &lens : cached) {
+        if (!valid_ids.count(lens.catalog_id) || lens.id <= 0 ||
+            !std::isfinite(lens.ra) || !std::isfinite(lens.dec) ||
+            !std::isfinite(lens.z) || !std::isfinite(lens.log_mh) ||
+            lens.ra < 0 || lens.ra >= 360 || lens.dec < -90 || lens.dec > 90) return false;
         if (center == Center::bcg) {
-            if (v.galaxy_id < 0 || !(v.stellar_mass > 0 && std::isfinite(v.stellar_mass))) return false;
-        } else if (v.galaxy_id != -1 || v.stellar_mass != 0 || v.photometry_select != 0) {
+            if (lens.galaxy_id < 0 || !(lens.stellar_mass > 0 && std::isfinite(lens.stellar_mass))) return false;
+        } else if (lens.galaxy_id != -1 || lens.stellar_mass != 0 || lens.photometry_select != 0) {
             return false;
         }
     }
-    in >> std::ws;
-    if (!in.eof() || in.bad()) return false;
-    lenses.swap(temp);
+    lenses.swap(cached);
     return true;
 }
 
-// ==========================================
-// Function: write_lens_cache
-// Method: Publish a complete cache using a unique temporary name on the shared filesystem.
-// ==========================================
-void write_lens_cache(const std::string &path, const std::string &key,
+void write_lens_cache(const std::string &path, const std::string &key, Center center,
                       const std::vector<Lens> &lenses) {
     if (path.empty()) return;
-    std::string staging = path + ".tmp.XXXXXX";
-    if (!mkdtemp(staging.data()))
-        throw std::runtime_error("Cannot create temporary lens cache directory for " + path);
-    const auto tmp = fs::path(staging) / "cache";
-    std::error_code ignored;
-    try {
-        std::ofstream out(tmp);
-        if (!out) throw std::runtime_error("Cannot write lens cache: " + tmp.string());
-        out << key << '\n' << lenses.size() << '\n' << std::setprecision(17);
-        for (const auto &v : lenses)
-            out << v.catalog_id << ' ' << v.id << ' ' << v.ra << ' ' << v.dec
-                << ' ' << v.z << ' ' << v.log_mh << ' ' << v.galaxy_id
-                << ' ' << v.stellar_mass << ' ' << v.photometry_select << '\n';
-        out.close();
-        if (!out) throw std::runtime_error("Error writing lens cache: " + tmp.string());
-        fs::rename(tmp, path);
-    } catch (...) {
-        fs::remove(tmp, ignored);
-        fs::remove(staging, ignored);
-        throw;
-    }
-    fs::remove(staging, ignored);
+    archive::publish(path, [&](const auto &temporary) {
+        archive::Writer out(temporary);
+        out.write(cache_magic, sizeof(cache_magic) - 1);
+        out.put(static_cast<std::uint64_t>(key.size()));
+        out.write(key.data(), key.size());
+        out.put(static_cast<std::uint32_t>(lenses.size()));
+        for (const auto &lens : lenses) {
+            out.put(static_cast<std::int32_t>(lens.catalog_id));
+            out.put(lens.id);
+            out.put(lens.ra);
+            out.put(lens.dec);
+            out.put(lens.z);
+            out.put(lens.log_mh);
+            if (center == Center::bcg) {
+                out.put(lens.galaxy_id);
+                out.put(lens.stellar_mass);
+                out.put(static_cast<std::int32_t>(lens.photometry_select));
+            }
+        }
+        out.seal();
+    });
 }
-
 } // namespace bcg

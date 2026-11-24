@@ -64,7 +64,7 @@ std::string catalog_fingerprint(const std::vector<CatalogTriple> &triples,
 bool read_lens_cache(const std::string &path, const std::string &key,
                      const std::vector<CatalogTriple> &triples, Center center,
                      std::vector<Lens> &lenses);
-void write_lens_cache(const std::string &path, const std::string &key,
+void write_lens_cache(const std::string &path, const std::string &key, Center center,
                       const std::vector<Lens> &lenses);
 
 std::vector<Lens> select_dr9_groups(const CatalogTriple &triple, const GroupColumns &columns,

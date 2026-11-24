@@ -157,6 +157,8 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
         std::cout << "\nJackknife regions: " << sample.regions << '/' << cfg.n_jack
                   << ", groups per region " << *bounds.first << " to " << *bounds.second << std::endl;
     }
+    stack.photometry_selected = report_photometry ? static_cast<std::int64_t>(reliable) : -1;
+    stack.groups_per_region = std::move(counts);
     return stack;
 }
 } // namespace bcg_esd

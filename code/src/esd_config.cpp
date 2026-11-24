@@ -8,7 +8,8 @@ Stage parse_stage(const std::string &name) {
     if (name == "all") return Stage::all;
     if (name == "measure") return Stage::measure;
     if (name == "fit") return Stage::fit;
-    throw std::invalid_argument("stage must be all, measure or fit");
+    if (name == "pull") return Stage::pull;
+    throw std::invalid_argument("stage must be all, measure, fit or pull");
 }
 
 void validate_cosmology(const CosmologyParameters &c) {
@@ -291,14 +292,19 @@ void resolve_outputs(Config &c, int rank) {
         throw std::runtime_error("run.output must be a filename when run.output-dir is set");
 
     const path result_root = directory.empty() ? output.parent_path() : directory;
-    const path measurement = directory.empty() ? output : directory / "measurement" / output;
-    const auto measurement_base = (measurement.parent_path() / measurement.stem()).string();
-    c.output = measurement.string();
-    c.covariance_output = measurement_base + "_cov.dat";
-    c.replica_output = measurement_base + "_jackknife.dat";
-    c.fit_input_output = measurement_base + "_fit_input.dat";
+    const auto filename = output.filename();
+    const auto stem = output.stem().string();
+    if (filename == "measurement" || filename == "fit")
+        throw std::runtime_error("run.output conflicts with a stage directory: " + filename.string());
+    c.output = (result_root / filename).string();
+    c.measurement_output = (result_root / "measurement" / (stem + "_measurement.bin")).string();
+    c.legacy_measurement = (result_root / "measurement" / filename).string();
+    c.fit_archive = (result_root / "fit" / stem).string();
+    c.legacy_fit_base = (result_root / stem).string();
 
-    if (c.stage != Stage::fit) {
+    const bool measures = c.stage == Stage::all || c.stage == Stage::measure;
+    const bool renders = c.stage == Stage::all || c.stage == Stage::pull;
+    if (measures) {
         if (!c.cache.empty() && c.center != bcg::Center::bcg) {
             const path cache(c.cache);
             c.cache = (cache.parent_path() / (cache.stem().string() + "_" +
@@ -307,13 +313,9 @@ void resolve_outputs(Config &c, int rank) {
         if (c.scratch_dir.empty())
             c.scratch_dir = bcg::fs::absolute(result_root / ".bcg_scratch").string();
     }
-    if (c.stage != Stage::measure) {
-        const auto fit_base = (result_root / output.stem()).string();
-        c.summary_output = fit_base + "_fit.json";
-        c.chain_output = fit_base + "_chain.npz";
-        c.profile_output = fit_base + "_profiles.dat";
-        c.profile_draws_output = fit_base + "_profile_draws.npz";
-        c.fit_plot = c.fit_plot.empty() ? fit_base + "_fit.png" : (directory / c.fit_plot).string();
+    if (renders) {
+        c.fit_plot = c.fit_plot.empty() ? c.legacy_fit_base + "_fit.png" : (directory / c.fit_plot).string();
+        c.posterior_plot = c.legacy_fit_base + "_posterior.png";
         if (path(c.fit_plot).extension() != ".png")
             throw std::runtime_error("Plot output must end in .png: " + c.fit_plot);
     }
@@ -322,20 +324,19 @@ void resolve_outputs(Config &c, int rank) {
         const auto canonical = [](const std::string &file) {
             return bcg::fs::weakly_canonical(bcg::fs::absolute(file)).string();
         };
-        std::unordered_set<std::string> paths{
-            canonical(c.output), canonical(c.covariance_output), canonical(c.replica_output), canonical(c.fit_input_output)
-        };
-        if (c.stage != Stage::fit && paths.size() != 4)
-            throw std::runtime_error("Each measurement product must have a distinct path");
-        if (c.stage == Stage::fit && !c.fit_input_path.empty()) paths.insert(canonical(c.fit_input_path));
+        std::unordered_set<std::string> paths{canonical(c.measurement_output), canonical(c.fit_archive)};
         const auto require_distinct = [&](const std::string &file) {
             if (!file.empty() && !paths.insert(canonical(file)).second)
                 throw std::runtime_error("Each output must have a distinct path: " + file);
         };
-        if (c.stage != Stage::fit) require_distinct(c.cache);
-        if (c.stage != Stage::measure) {
-            for (const auto &file : {c.fit_plot, c.summary_output, c.chain_output, c.profile_output, c.profile_draws_output})
-                require_distinct(file);
+        if (renders) {
+            require_distinct(c.output);
+            require_distinct(c.fit_plot);
+            require_distinct(c.posterior_plot);
+        }
+        if (measures) {
+            if (!renders) require_distinct(c.output);
+            require_distinct(c.cache);
         }
     }
 }
@@ -373,8 +374,8 @@ Config load_config(const char *ini_path, MPI_Comm comm, const char *stage_overri
     Config cfg;
     apply_ini(cfg, text);
     if (stage_override) cfg.stage = parse_stage(stage_override);
-    if (cfg.stage != Stage::fit) validate_measurement_config(cfg);
-    if (cfg.stage != Stage::measure) validate_fit_config(cfg);
+    if (cfg.stage == Stage::measure || cfg.stage == Stage::all) validate_measurement_config(cfg);
+    if (cfg.stage == Stage::fit || cfg.stage == Stage::all) validate_fit_config(cfg);
     resolve_outputs(cfg, rank);
     return cfg;
 }

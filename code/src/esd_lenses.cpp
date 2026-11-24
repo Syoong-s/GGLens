@@ -50,7 +50,7 @@ std::vector<bcg::Lens> load_lenses(const Config &cfg, MPI_Comm comm) {
     if (cfg.center == bcg::Center::bcg) bcg::resolve_dr9_galaxies(triples, columns.galaxy, lenses, comm);
     else bcg::resolve_dr9_centroids(triples, columns, lenses, comm);
     if (!rank) {
-        bcg::write_lens_cache(cfg.cache, key, lenses);
+        bcg::write_lens_cache(cfg.cache, key, cfg.center, lenses);
         std::cout << "Resolved " << lenses.size() << ' ' << bcg::center_name(cfg.center)
                   << " centers" << std::endl;
     }

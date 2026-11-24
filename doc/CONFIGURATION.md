@@ -6,10 +6,10 @@ Pass the configuration file path to `esd_bcg_mpi`. When the path is omitted, the
 
 | Key under `[run]` | What to set |
 | --- | --- |
-| `stage` | `all` runs measurement followed by fitting and is the default. `measure` saves the ESD and fit input. `fit` reads an existing measurement and runs the five-parameter fit. Use `--stage all`, `--stage measure`, or `--stage fit` to override the INI for one launch. |
+| `stage` | `all` runs `measure`, `fit`, and `pull` in order and is the default. `measure` creates the binary measurement snapshot. `fit` reads it and writes the full chain and profile draws. `pull` reads both stages and exports the figures and table. Use `--stage` to override the INI for one launch. |
 | `group-list`, `shear-list` | Paths to the two input lists, required for `measure` and `all`. The defaults are `group_catalogs.list` and `shear_catalogs.list` in the launch directory. [Input formats](INPUTS.md) |
-| `output-dir` | Optional result directory. Measurement files go in its `measurement/` subdirectory and fit products go in the result directory. The program creates the directories it writes to. |
-| `output` | Name of the ESD table and source of the shared file prefix, by default `ESD_results.dat`. Use a filename with `output-dir`. With `output-dir` omitted, `output` can be a path and all products go beside the ESD table. |
+| `output-dir` | Optional result directory. The measurement snapshot goes in `measurement/`, the two fit archives go in `fit/<prefix>/`, and the three display products go in the result directory. |
+| `output` | Name of the exported ESD table and source of the shared file prefix, by default `ESD_results.dat`. Use a filename with `output-dir`. With `output-dir` omitted, the parent of `output` serves as the result directory. |
 | `cache` | Optional path to save and reuse resolved centers. LWC and NWC add `_lwc` or `_nwc` before the extension. |
 | `scratch-dir` | Directory for temporary files. The default is `.bcg_scratch` inside `output-dir` or beside the ESD table when `output-dir` is omitted. On a multi-node run, use a shared location with sufficient free space. |
 | `memory-mb` | Buffer budget per process in MiB. Default `512`, minimum `64`. |
@@ -102,13 +102,13 @@ Enter any number of nonnegative CCD IDs on one line, separated by commas. For ex
 
 | Key under `[fit]` | Default | What to set |
 | --- | --- | --- |
-| `input` | unset | In `stage = fit`, set a path to a `*_fit_input.dat` saved by a measurement. When omitted, the program uses the `*_fit_input.dat` derived from `[run] output` and `output-dir`. |
+| `input` | unset | In `stage = fit`, set a path to a `*_measurement.bin` from another run. The default is the snapshot derived from `[run] output` and `output-dir`. A later `pull` follows the fit's saved reference. Set this key in `pull` to locate the same snapshot after moving it. |
 | `walkers` | `72` | Even number, at least `10`. |
 | `steps`, `burn-in` | `10000`, `1000` | Steps per walker and initial steps to discard. Use fewer discard steps than total steps. |
 | `ensembles`, `seed` | `4`, `12771` | Number of independent fit runs and the nonnegative seed. |
-| `profile-draws` | `4096` | Maximum number of fitted profile draws to save. The full parameter chain is saved separately. |
-| `python-path` | unset | Optional directory containing Python packages for the fit. |
+| `profile-draws` | `4096` | Maximum number of retained chain positions sampled to compute profile bands. The archive preserves every selected position and includes the global best curve. |
+| `python-path` | unset | Optional directory containing Python packages for fitting or plotting. |
 
-The saved fit input supplies the center, lens statistics, and cosmology. To use an earlier FQ GGLens measurement, set `input` to its eight-column ESD table and keep its `*_cov.dat` beside it. When `input` is omitted and the derived fit-input file is absent, the program also checks the ESD table at the configured output path. For these earlier tables, copy the cosmology keys from the original `[measurement]` settings into the fit INI.
+The saved measurement supplies the center, lens statistics, and cosmology. Earlier `*_fit_input.dat` snapshots and matching eight-column ESD tables with `*_cov.dat` can also be passed as `input`. For older ESD/covariance pairs, supply the original cosmology in `[measurement]`. To export every measured point after fitting from a legacy `*_fit_input.dat`, place its original ESD table beside it.
 
-In `[plots]`, set `title` to override the default center-based title or set `esd-plot` to choose a different `.png` path. With `output-dir` set, a relative `esd-plot` starts from that directory. The default figure name follows the ESD table name. [Result files](RESULTS.md)
+In `[plots]`, set `title` to override the center-based ESD figure title, or set `esd-plot` to choose a different `.png` path for `pull`. With `output-dir` set, a relative `esd-plot` starts from that directory. The default figure names follow the ESD table name. [Result files](RESULTS.md)

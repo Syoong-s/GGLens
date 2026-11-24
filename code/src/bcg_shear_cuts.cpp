@@ -49,9 +49,8 @@ bool select_shear_row(const ShearRow &row, const Cuts &cuts, Source &source, Bar
     const double rhalf = need_psf ? std::sqrt(area / pi) * 0.2628 * 2.0 : 0.0;
     if (cut_enabled(cuts.r_half_thresh) && rhalf <= cuts.r_half_thresh * psf) return false;
 
-    source = {ra, dec, zp, v[Field::g1], v[Field::g2], v[Field::de], v[Field::h1], v[Field::h2]};
-    source.gf1 = gf1;
-    source.gf2 = gf2;
+    source = Source({ra, dec, zp, v[Field::g1], v[Field::g2], v[Field::de],
+                     v[Field::h1], v[Field::h2], gf1, gf2});
     if (cuts.bar_enabled()) {
         bar = {mag, (rhalf - psf) / psf, snr, 0};
         if (cuts.exposure_bar_enabled()) {

@@ -44,12 +44,18 @@ struct CatalogTriple {
 // Structure: Source
 // Method: Retain Cartesian moments and field distortion for source-level calibration.
 // ==========================================
-struct Source {
+struct SourceRecord {
     double ra = 0, dec = 0, zp = 0;
     double g1 = 0, g2 = 0, de = 0, h1 = 0, h2 = 0;
+    double gf1 = 0, gf2 = 0;
+};
+
+struct Source : SourceRecord {
     double chi = 0;
     double xyz[3] = {0, 0, 0};
-    double gf1 = 0, gf2 = 0;
+
+    Source() = default;
+    explicit Source(const SourceRecord &record) : SourceRecord(record) {}
 };
 
 // ==========================================

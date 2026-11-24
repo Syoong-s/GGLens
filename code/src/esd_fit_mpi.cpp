@@ -53,7 +53,7 @@ std::vector<double> gather_chain(const std::vector<double> &local, int ensembles
 // Function: fit_esd
 // Method: Share one CAMB run, sample independent ensembles on MPI ranks, and combine retained draws.
 // ==========================================
-void fit_esd(FitInput input, const Config &cfg, MPI_Comm comm) {
+std::unique_ptr<FitBackend> fit_esd(FitInput input, const Config &cfg, MPI_Comm comm) {
     int rank = 0, ranks = 1;
     MPI_Comm_rank(comm, &rank);
     MPI_Comm_size(comm, &ranks);
@@ -63,8 +63,6 @@ void fit_esd(FitInput input, const Config &cfg, MPI_Comm comm) {
             throw std::runtime_error("Five-parameter ESD fit needs at least six complete jackknife bins");
         if (static_cast<std::size_t>(input.metadata.sample.regions) <= input.bins.size())
             throw std::runtime_error("A full-rank covariance needs more jackknife regions than fitted radial bins");
-        for (const auto &file : {cfg.summary_output, cfg.fit_plot})
-            bcg::fs::create_directories(bcg::fs::absolute(file).parent_path());
     }
     broadcast_input(input, rank, comm);
 
@@ -97,6 +95,8 @@ void fit_esd(FitInput input, const Config &cfg, MPI_Comm comm) {
     }
     FitChain combined{gather_chain(local.samples, cfg.fit_ensembles, stride, comm),
                       gather_chain(local.diagnostics, cfg.fit_ensembles, 6, comm)};
-    if (!rank) backend->finish(combined, cfg, input);
+    if (rank) return {};
+    backend->finish(combined, cfg, input);
+    return backend;
 }
 } // namespace bcg_esd

@@ -1,4 +1,5 @@
 #include "bcg_esd.hpp"
+#include "esd_fit_backend.hpp"
 #include "selfcalibration.hpp"
 #include <iostream>
 
@@ -7,12 +8,10 @@ namespace {
 // Function: measure
 // Method: Measure the ESD and publish the data needed to fit it on a later run.
 // ==========================================
-bcg_esd::FitInput measure(bcg_esd::Config &cfg, MPI_Comm comm) {
+void measure(bcg_esd::Config &cfg, MPI_Comm comm) {
     int rank = 0, size = 1;
     MPI_Comm_rank(comm, &rank); MPI_Comm_size(comm, &size);
     if (!rank) {
-        bcg::fs::create_directories(bcg::fs::absolute(cfg.output).parent_path());
-        if (!cfg.cache.empty()) bcg::fs::create_directories(bcg::fs::absolute(cfg.cache).parent_path());
         std::cout << "Lens center: " << bcg::center_name(cfg.center) << std::endl;
         if (cfg.self_calibrate) std::cout << "Self-calibration enabled: Cartesian all-R union; manual m/c will be overridden" << std::endl;
         else std::cout << "Shear calibration: " << cfg.calibration.description() << std::endl;
@@ -29,10 +28,12 @@ bcg_esd::FitInput measure(bcg_esd::Config &cfg, MPI_Comm comm) {
     const auto lenses = bcg_esd::load_lenses(cfg, comm);
     bcg::ScratchSpace scratch(cfg.scratch_dir, comm);
     bcg_esd::SelfCalibrationDiagnostics diagnostics;
-    auto bins = bcg_esd::build_pair_spools(lenses, files, layout, cfg, diagnostics, scratch, comm);
-    const auto stack = bcg_esd::make_lens_stack(lenses, bins, cfg, comm);
+    bcg_esd::Measurement measurement;
+    auto bins = bcg_esd::build_pair_spools(lenses, files, layout, cfg, diagnostics, scratch,
+                                         measurement.sources_after_cuts, comm);
+    auto stack = bcg_esd::make_lens_stack(lenses, bins, cfg, comm);
     const auto edges = bcg_esd::radial_edges(cfg);
-    std::vector<bcg_esd::Result> results; results.reserve(cfg.n_r_bins);
+    if (!rank) measurement.bins.reserve(cfg.n_r_bins);
     for (int i = 0; i < cfg.n_r_bins; ++i) {
         if (!rank) std::cout << "Measuring bin " << i + 1 << '/' << cfg.n_r_bins
                              << " R=[" << edges[i] << ',' << edges[i + 1] << ")" << std::endl;
@@ -41,32 +42,40 @@ bcg_esd::FitInput measure(bcg_esd::Config &cfg, MPI_Comm comm) {
         if (!rank) {
             std::cout << "bin " << i + 1 << '/' << cfg.n_r_bins << " pairs=" << result.count
                       << " R_eff=" << result.effective << " ESD=" << result.measured << std::endl;
+            measurement.bins.push_back(std::move(result));
         }
-        results.push_back(std::move(result));
     }
     scratch.cleanup(comm);
-    if (rank) return {};
-    const auto covariance = bcg_esd::jackknife_covariance(results, stack.sample.regions);
-    auto input = bcg_esd::make_fit_input(results, covariance, stack.sample, cfg.center, cfg.cosmology);
-    bcg_esd::write_results(results, covariance, input, cfg);
-    std::cout << "Saved ESD and jackknife covariance: " << cfg.output << '\n'
-              << "Saved ESD fit input: " << cfg.fit_input_output << std::endl;
-    return input;
+    if (rank) return;
+    measurement.metadata = {cfg.center, cfg.cosmology, stack.sample, cfg.n_r_bins};
+    measurement.groups_per_region = std::move(stack.groups_per_region);
+    measurement.photometry_selected = stack.photometry_selected;
+    measurement.requested_regions = cfg.n_jack;
+    measurement.fd_restored = cfg.fd_corrected;
+    measurement.calibration = cfg.calibration;
+    if (cfg.self_calibrate) {
+        measurement.calibration_sources = cfg.self_calibration_sources;
+        measurement.fd_bins = cfg.selfcal_fd_bins;
+        measurement.fd_limit = cfg.fd_limit();
+    }
+    bcg_esd::write_measurement(cfg.measurement_output, measurement);
+    std::cout << "Saved ESD measurement: " << cfg.measurement_output << std::endl;
 }
 
 void run(bcg_esd::Config &cfg, MPI_Comm comm) {
     using bcg_esd::Stage;
     int rank = 0;
     MPI_Comm_rank(comm, &rank);
-    bcg_esd::FitInput input;
-    if (cfg.stage == Stage::fit) {
-        if (!rank) input = bcg_esd::load_fit_input(cfg);
-    } else {
-        input = measure(cfg, comm);
-        if (cfg.stage == Stage::measure) return;
+    if (cfg.stage == Stage::pull) {
+        if (!rank) bcg_esd::FitBackend(cfg).pull(cfg);
+        return;
     }
-    bcg_esd::fit_esd(std::move(input), cfg, comm);
-    if (!rank) std::cout << "Fit figure: " << cfg.fit_plot << std::endl;
+    if (cfg.stage == Stage::all || cfg.stage == Stage::measure) measure(cfg, comm);
+    if (cfg.stage == Stage::measure) return;
+    bcg_esd::FitInput input;
+    if (!rank) input = bcg_esd::load_fit_input(cfg);
+    auto backend = bcg_esd::fit_esd(std::move(input), cfg, comm);
+    if (!rank && cfg.stage == Stage::all) backend->pull(cfg);
 }
 } // namespace
 
@@ -78,7 +87,7 @@ int main(int argc, char **argv) {
     MPI_Init(&argc, &argv);
     int rank = 0; MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     try {
-        const std::string usage = std::string("Usage: ") + argv[0] + " [--stage all|measure|fit] [ini-path]";
+        const std::string usage = std::string("Usage: ") + argv[0] + " [--stage all|measure|fit|pull] [ini-path]";
         const char *ini_path = nullptr;
         const char *stage = nullptr;
         for (int i = 1; i < argc; ++i) {

@@ -2,7 +2,7 @@
 
 FQ GGLens measures the excess surface density (ESD) of galaxy groups from configurable lens catalogs and Fourier Quad shear catalogs. The default lens layout matches DESI Legacy Imaging Surveys DR9. Choose the brightest central galaxy (BCG), the luminosity-weighted center (LWC), or the number-weighted center (NWC) for each run.
 
-Measure and fit in a single run, or save the ESD and use it in a later five-parameter fit. Fitting produces a parameter chain, best-fit and posterior profiles, and a figure.
+Run measurement, fitting, and export together or as independent stages. Measurement and fitting save binary snapshots. The `pull` stage reads those snapshots and produces the ESD figure, ESD data table, and five-parameter posterior figure.
 
 | Guide | What it covers |
 | --- | --- |

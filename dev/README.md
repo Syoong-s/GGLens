@@ -32,7 +32,7 @@ The executable measures one group sample around one selected center and can fit 
 
 ## Build and runtime
 
-The Makefile in `code/` compiles C++17 with `mpicxx`. It uses `PYTHON_CONFIG --includes` and `PYTHON_CONFIG --ldflags --embed` from the same Python environment. The build converts `esd_nfw.py`, `esd_two_halo.py`, `esd_profiles.py`, `esd_plot.py`, and `esd_fit.py` into generated includes and links them through `libesd_fit.a`. Edit the Python files under `code/script/` and rebuild the executable to update the embedded modules.
+The Makefile in `code/` compiles C++17 with `mpicxx`. It uses `PYTHON_CONFIG --includes` and `PYTHON_CONFIG --ldflags --embed` from the same Python environment. The build converts `esd_nfw.py`, `esd_two_halo.py`, `esd_archive.py`, `esd_profiles.py`, `esd_plot.py`, and `esd_fit.py` into generated includes and links them through `libesd_fit.a`. Edit the Python files under `code/script/` and rebuild the executable to update the embedded modules.
 
 The fit bridge initializes isolated CPython only on ranks assigned an ensemble. It disables Python bytecode writes and signal-handler installation. The bridge adds `[fit] python-path` to the embedded search path when set. Use that setting for dependencies outside the linked environment.
 
@@ -55,7 +55,7 @@ For builds using normal linker resolution, a mixed environment that reports `CXX
 
 Run `make -C code test-catalogs` with an MPI installation that can launch four ranks. Set `MPIEXEC` and `MPIEXEC_FLAGS` for the local launcher. The test compares BCG, LWC, and NWC centers from DR9, reordered CSV, and catalogs that identify objects by data row number. It also exercises minimal NWC inputs, startup column errors, and cache invalidation.
 
-Run `make -C code test-stages` with the fit dependencies and two MPI ranks. It compares the fit chain and summary from a combined run, a later fit using the saved input, and a fit using the earlier ESD and covariance table layout. Set `FQ_GGLENS_TEST_PYTHON_PATH` if the embedded interpreter needs an additional package directory.
+Run `make -C code test-stages` with the fit dependencies and two MPI ranks. It checks the lossless archive round trip, combined and split runs, offline regeneration of the displays, and older fit inputs. Set `FQ_GGLENS_TEST_PYTHON_PATH` if the embedded interpreter needs an additional package directory.
 
 | Area | Reference check |
 | --- | --- |

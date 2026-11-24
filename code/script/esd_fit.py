@@ -1,18 +1,14 @@
 """Five-parameter group lensing fit called by the embedded Python runtime."""
 
-import hashlib
-import json
-
 import emcee
 import numpy as np
 from scipy.linalg import solve_triangular
 
 from esd_nfw import OffsetNfw, nfw_esd
 from esd_two_halo import TwoHalo, nonlinear_correlation
-from esd_profiles import COMPONENTS, evaluate_profiles, write_atomic, write_profiles
-from esd_plot import render_fit
+from esd_archive import PARAMETERS, save_fit
+from esd_profiles import evaluate_profile_draws, stellar_profile
 
-NAMES = ("log10_M180m", "concentration", "f_cen", "R_sig_over_r180m", "b_h")
 LOWER = np.array([12.0, 1.0, 0.0, 0.0, 0.3])
 UPPER = np.array([16.0, 20.0, 1.0, 1.0, 10.0])
 
@@ -54,7 +50,7 @@ class HaloModel:
         x = r/rs
         centered = nfw_esd(x)
         off = self.offset.evaluate(x, eta*c, centered)
-        stellar = self.stellar_mass / (np.pi*r*r*1e12)
+        stellar = stellar_profile(r, self.stellar_mass)
         one = normalization*(f_cen*centered + (1-f_cen)*off)
         two = bias * two_halo.evaluate(r180)
         return np.broadcast_to(stellar, one.shape), one, two
@@ -103,16 +99,16 @@ class FitProblem:
 # ==========================================
 def sample_ensemble(problem, walkers, steps, burn, seed, ensemble):
     rng = np.random.default_rng(np.random.SeedSequence([seed, ensemble]))
-    sampler = emcee.EnsembleSampler(walkers, len(NAMES), problem.log_probability, vectorize=True)
+    sampler = emcee.EnsembleSampler(walkers, len(PARAMETERS), problem.log_probability, vectorize=True)
     sampler.random_state = np.random.RandomState(rng.integers(2**32)).get_state()
-    initial = rng.uniform(LOWER, UPPER, size=(walkers, len(NAMES)))
+    initial = rng.uniform(LOWER, UPPER, size=(walkers, len(PARAMETERS)))
     sampler.run_mcmc(initial, steps, progress=False)
     chain = sampler.get_chain(discard=burn)
     logp = sampler.get_log_prob(discard=burn)
     if not np.all(np.isfinite(logp)):
         raise ValueError("Non-finite MCMC log posterior in retained chain")
     tau = (emcee.autocorr.integrated_time(chain, tol=0) if chain.shape[0] >= 8
-           else np.full(len(NAMES), np.nan))
+           else np.full(len(PARAMETERS), np.nan))
     stats = np.r_[np.mean(sampler.acceptance_fraction), tau]
     packed = np.concatenate((chain, logp[:, :, None]), axis=2)
     return packed.astype(np.float64, copy=False).tobytes(), stats.astype(np.float64).tobytes()
@@ -120,63 +116,17 @@ def sample_ensemble(problem, walkers, steps, burn, seed, ensemble):
 
 # ==========================================
 # Function: finish_fit
-# Method: Report the best retained draw, both forms of posterior, and the reproducible fit plot.
+# Method: Capture the retained chain and joint prediction draws for a later pull.
 # ==========================================
-def finish_fit(problem, chain_bytes, stats_bytes, shape, paths, context):
+def finish_fit(problem, chain_bytes, stats_bytes, shape, archive, context):
     ensembles, steps, walkers = shape
     chain = np.frombuffer(chain_bytes, dtype=np.float64).reshape((ensembles, steps, walkers, 6))
     stats = np.frombuffer(stats_bytes, dtype=np.float64).reshape((ensembles, 6))
     flat = chain.reshape(-1, 6)
-    posterior = flat[:, :-1]
     best_index = int(np.argmax(flat[:, -1]))
-    best = posterior[best_index]
     chi2 = float(-2.0 * flat[best_index, -1])
-    q = np.percentile(posterior, [16, 50, 84], axis=0).T
-    dof = problem.r.size - len(NAMES)
-    profiles, indices, draws = evaluate_profiles(
-        problem, posterior, best_index, context["profile_draws"], context["seed"]
-    )
-    obs_indices = np.searchsorted(profiles.radius, problem.r)
-    center = context["center"]
-    signature = hashlib.sha256(chain_bytes)
-    signature.update(center.encode("ascii"))
-    for values in (problem.r, problem.y, problem.cov, indices,
-                   profiles.radius, profiles.best, profiles.quantiles):
-        signature.update(values.tobytes())
-    fit_id = signature.hexdigest()
-    summary = {
-        "fit_id": fit_id, "center": center, "n_fit_bins": problem.r.size, "n_lenses": context["n_lenses"],
-        "n_jack": context["regions"], "effective_redshift": context["redshift"],
-        "cosmology": context["cosmology"],
-        "fixed_mean_stellar_mass_Msun_over_h": problem.model.stellar_mass,
-        "chi2": chi2, "degrees_of_freedom": int(dof), "best_chain_index": best_index,
-        "steps_per_walker": steps + context["burn_in"], "burn_in_per_walker": context["burn_in"],
-        "n_profile_draws": len(indices), "plot_title": context["title"],
-        "parameters": {
-            name: dict(zip(("best", "p16", "median", "p84"), [b, *row]))
-            for name, b, row in zip(NAMES, best, q)
-        },
-        "ensembles": [{
-            "acceptance_fraction": row[0],
-            "autocorrelation_steps": [x if np.isfinite(x) and x > 0 else None for x in row[1:]],
-            "length_at_least_50_tau": bool(np.all((row[1:] > 0) & (steps >= 50*row[1:]))),
-        } for row in stats],
-        "fitted_profile": {
-            "R_Mpc_over_h": problem.r.tolist(),
-            **{term: profiles.best[obs_indices, i].tolist() for i, term in enumerate(COMPONENTS)},
-        },
-    }
-    if center == "bcg":
-        summary["n_bcg"] = context["n_lenses"]
-
-    write_atomic(paths["chain"], "wb", lambda stream: np.savez(
-        stream, posterior=chain[..., :-1], log_probability=chain[..., -1],
-        names=NAMES, radii=problem.r, measured=problem.y, covariance=problem.cov,
-        fit_bins=context["fit_bins"], center=center, fit_id=fit_id,
-    ))
-    write_profiles(paths["profiles"], paths["draws"], profiles, indices, draws,
-                   center, context["seed"], fit_id)
-    render_fit(problem.r, problem.y, problem.cov, profiles, chi2, dof, paths["plot"], context["title"])
-    write_atomic(paths["summary"], "w",
-                 lambda stream: json.dump(summary, stream, indent=2, allow_nan=False))
+    dof = problem.r.size - len(PARAMETERS)
+    curves = evaluate_profile_draws(problem, flat[:, :-1], best_index, context["profile_draws"], context["seed"])
+    save_fit(archive, chain, stats, curves, context)
     print(f"Best retained draw: chi2/dof={chi2:.5g}/{dof}, samples={len(flat)}", flush=True)
+    print(f"Saved fit archives: {archive}", flush=True)

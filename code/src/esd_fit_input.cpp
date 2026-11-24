@@ -1,4 +1,5 @@
 #include "bcg_esd.hpp"
+#include "bcg_archive.hpp"
 #include <iostream>
 
 namespace bcg_esd {
@@ -95,13 +96,16 @@ double table_number(std::istream &in) {
     return value;
 }
 
-std::vector<Result> read_legacy_esd(std::istream &in, std::string &center, LensSummary &sample) {
+std::vector<Result> read_legacy_esd(std::istream &in, std::string &center, LensSummary &sample,
+                                    bool companion = false) {
     std::vector<Result> results;
     for (std::string line; std::getline(in, line);) {
         line = bcg::trim(line);
         if (line.empty()) continue;
-        if (line.rfind("# fit_input=", 0) == 0)
+        if (!companion && line.rfind("# fit_input=", 0) == 0)
             throw std::runtime_error("Use the companion ESD fit input file " + line.substr(12));
+        if (line.rfind("# measurement=", 0) == 0)
+            throw std::runtime_error("Use the binary measurement snapshot " + line.substr(14));
         if (line.rfind("# center=", 0) == 0 && center.empty()) {
             auto fields = legacy_header(std::move(line));
             read_field(fields, "center", center);
@@ -191,49 +195,159 @@ FitInput make_fit_input(const std::vector<Result> &results, const Covariance &co
     return input;
 }
 
-void write_fit_input(std::ostream &out, const FitInput &input) {
-    const auto &[center, cosmology, sample, radial_bins] = input.metadata;
-    const auto count = input.bins.size();
-    out << format_name << ' ' << format_version << '\n'
-        << "center " << bcg::center_name(center) << '\n'
-        << "sample " << sample.n_lenses << ' ' << sample.regions << ' ' << sample.redshift << ' ' << sample.stellar_mass << '\n'
-        << "cosmology " << cosmology.omega_m << ' ' << cosmology.h << ' ' << cosmology.sigma8 << ' '
-        << cosmology.omega_b_h2 << ' ' << cosmology.spectral_index << ' ' << cosmology.neutrino_mass << '\n'
-        << "radial_bins " << radial_bins << '\n' << "fit_bins " << count << '\n'
-        << "index_radius_esd\n";
-    for (std::size_t i = 0; i < count; ++i)
-        out << input.bins[i] << ' ' << input.radius[i] << ' ' << input.measured[i] << '\n';
-    out << "covariance\n";
-    for (std::size_t row = 0; row < count; ++row)
-        for (std::size_t col = 0; col < count; ++col)
-            out << input.covariance[row * count + col] << (col + 1 == count ? '\n' : ' ');
+namespace {
+using bcg::fs::path;
+
+path legacy_snapshot(const path &table) {
+    return table.parent_path() / (table.stem().string() + "_fit_input.dat");
 }
 
-FitInput load_fit_input(const Config &cfg) {
-    bcg::fs::path path(cfg.fit_input_path.empty() ? cfg.fit_input_output : cfg.fit_input_path);
-    if (cfg.fit_input_path.empty() && !bcg::fs::exists(path) && bcg::fs::exists(cfg.output))
-        path = cfg.output;
-    auto in = open_input(path);
-    std::cout << "Reading ESD fit input: " << path.string() << std::endl;
-    try {
-        std::string first;
-        in >> first;
-        in.seekg(0);
-        if (first == format_name) return read_snapshot(in);
+path input_path(const Config &cfg) {
+    if (cfg.stage == Stage::all) return cfg.measurement_output;
+    if (!cfg.fit_input_path.empty()) return cfg.fit_input_path;
+    for (const auto &candidate : {path(cfg.measurement_output), legacy_snapshot(cfg.legacy_measurement),
+                                  legacy_snapshot(cfg.output), path(cfg.legacy_measurement), path(cfg.output)})
+        if (bcg::fs::is_regular_file(candidate)) return candidate;
+    return cfg.measurement_output;
+}
 
+FitInput from_measurement(Measurement &measurement, const path &source, bool diagonal_only) {
+    const auto &[center, cosmology, sample, radial_bins] = measurement.metadata;
+    const auto covariance = jackknife_covariance(measurement.bins, sample.regions, diagonal_only);
+    auto input = make_fit_input(measurement.bins, covariance, sample, center, cosmology);
+    input.measurement_id = measurement.id;
+    input.measurement_path = source.string();
+    return input;
+}
+
+bool legacy_fit_snapshot(const path &source) {
+    return bcg::archive::has_magic(source, format_name);
+}
+
+void hash_file(std::uint64_t &hash, const path &source) {
+    std::ifstream in(source, std::ios::binary);
+    char buffer[16384];
+    while (in.read(buffer, sizeof(buffer)) || in.gcount())
+        bcg::archive::hash_bytes(hash, buffer, static_cast<std::size_t>(in.gcount()));
+    if (!in.eof() || in.bad()) throw std::runtime_error("Cannot hash measurement input: " + source.string());
+}
+
+FitInput load_legacy_fit(const path &source, const Config &cfg) {
+    auto in = open_input(source);
+    FitInput input;
+    auto id = bcg::archive::hash_start;
+    hash_file(id, source);
+    if (legacy_fit_snapshot(source)) {
+        input = read_snapshot(in);
+    } else {
         std::string center;
         LensSummary sample;
-        const auto results = read_legacy_esd(in, center, sample);
-        const auto cov_path = path.parent_path() / (path.stem().string() + "_cov.dat");
-        const auto covariance = read_legacy_covariance(cov_path, results, center, sample.regions);
+        const auto bins = read_legacy_esd(in, center, sample);
+        const auto cov_file = source.parent_path() / (source.stem().string() + "_cov.dat");
+        const auto covariance = read_legacy_covariance(cov_file, bins, center, sample.regions);
+        hash_file(id, cov_file);
         std::cout << "Legacy ESD measurement: using [measurement] cosmology from the fit configuration" << std::endl;
-        return make_fit_input(results, covariance, sample, bcg::parse_center(center), cfg.cosmology);
-    } catch (const std::exception &error) {
-        throw std::runtime_error("Invalid ESD fit input " + path.string() + ": " + error.what());
+        input = make_fit_input(bins, covariance, sample, bcg::parse_center(center), cfg.cosmology);
+        input.legacy_cosmology = true;
+    }
+    input.measurement_id = id;
+    input.measurement_path = source.string();
+    return input;
+}
+
+path companion_table(const path &source, const Config &cfg) {
+    const std::string name = source.filename().string(), suffix = "_fit_input.dat";
+    if (name.size() > suffix.size() && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        const auto prefix = name.substr(0, name.size() - suffix.size());
+        const auto filename = path(cfg.output).filename();
+        if (filename.stem() == prefix && bcg::fs::is_regular_file(source.parent_path() / filename))
+            return source.parent_path() / filename;
+        if (bcg::fs::is_regular_file(source.parent_path() / (prefix + ".dat")))
+            return source.parent_path() / (prefix + ".dat");
+        for (const auto &entry : bcg::fs::directory_iterator(source.parent_path()))
+            if (entry.path().stem() == prefix && entry.is_regular_file()) return entry.path();
+    }
+    throw std::runtime_error("Full ESD table required beside the legacy fit input: " + source.string());
+}
+
+void check_companion(const path &table, const FitInput &fit) {
+    auto in = open_input(table);
+    std::string center;
+    LensSummary sample;
+    const auto rows = read_legacy_esd(in, center, sample, true);
+    const auto &reference = fit.metadata.sample;
+    if (center != bcg::center_name(fit.metadata.center) || sample.n_lenses != reference.n_lenses ||
+        sample.redshift != reference.redshift || sample.stellar_mass != reference.stellar_mass ||
+        sample.regions != reference.regions || rows.size() != static_cast<std::size_t>(fit.metadata.radial_bins))
+        throw std::runtime_error("Legacy ESD table has different measurement metadata");
+    for (std::size_t i = 0; i < fit.bins.size(); ++i) {
+        const auto &row = rows.at(fit.bins[i]);
+        const double error = std::sqrt(fit.covariance[i*(fit.bins.size()+1)]);
+        if (row.effective != fit.radius[i] || row.measured != fit.measured[i] || row.sigma != error)
+            throw std::runtime_error("Legacy ESD table and fit input contain different data points");
     }
 }
 
-void validate_fit_input(const FitInput &input) {
+std::string table_contents(const path &source) {
+    auto in = open_input(source);
+    std::ostringstream out;
+    out << in.rdbuf();
+    if (in.bad() || out.fail()) throw std::runtime_error("Cannot read ESD table: " + source.string());
+    return out.str();
+}
+
+void protect_measurement_file(const path &source, const Config &cfg, bool export_copy = false) {
+    const auto protected_path = bcg::fs::weakly_canonical(source);
+    for (const auto &destination : {cfg.output, cfg.fit_plot, cfg.posterior_plot}) {
+        if (export_copy && destination == cfg.output) continue;
+        if (bcg::fs::weakly_canonical(bcg::fs::absolute(destination)) == protected_path)
+            throw std::runtime_error("Pull output overlaps a measurement input: " + destination);
+    }
+}
+} // namespace
+
+FitInput load_fit_input(const Config &cfg) {
+    const auto source = bcg::fs::weakly_canonical(bcg::fs::absolute(input_path(cfg)));
+    std::cout << "Reading ESD fit input: " << source.string() << std::endl;
+    if (is_measurement_snapshot(source) || source.extension() == ".bin") {
+        auto measurement = read_measurement(source);
+        return from_measurement(measurement, source, false);
+    }
+    try {
+        return load_legacy_fit(source, cfg);
+    } catch (const std::exception &error) {
+        throw std::runtime_error("Invalid ESD fit input " + source.string() + ": " + error.what());
+    }
+}
+
+PullInput load_pull_input(const Config &cfg, const std::string &saved_measurement, bool legacy_fit) {
+    const auto requested = (cfg.stage == Stage::pull && !cfg.fit_input_path.empty()) || saved_measurement.empty()
+        ? input_path(cfg) : path(saved_measurement);
+    const auto source = bcg::fs::weakly_canonical(bcg::fs::absolute(requested));
+    std::cout << "Reading ESD measurement for pull: " << source.string() << std::endl;
+    if (is_measurement_snapshot(source) || source.extension() == ".bin") {
+        protect_measurement_file(source, cfg);
+        auto measurement = read_measurement(source);
+        auto fit = from_measurement(measurement, source, !legacy_fit);
+        validate_fit_input(fit, !legacy_fit);
+        if (cfg.stage == Stage::pull) print_measurement_summary(measurement);
+        return {std::move(fit), format_esd_table(measurement, source.filename().string())};
+    }
+    auto fit = load_legacy_fit(source, cfg);
+    validate_fit_input(fit);
+    const bool companion = legacy_fit_snapshot(source);
+    const auto table = companion ? companion_table(source, cfg) : source;
+    protect_measurement_file(source, cfg, !companion);
+    if (companion) {
+        protect_measurement_file(table, cfg, true);
+        check_companion(table, fit);
+    } else {
+        protect_measurement_file(source.parent_path() / (source.stem().string() + "_cov.dat"), cfg);
+    }
+    return {std::move(fit), table_contents(table)};
+}
+
+void validate_fit_input(const FitInput &input, bool diagonal_only) {
     const auto &[center, cosmology, sample, radial_bins] = input.metadata;
     validate_cosmology(cosmology);
     if (sample.regions < 2 || sample.n_lenses < sample.regions ||
@@ -248,7 +362,7 @@ void validate_fit_input(const FitInput &input) {
     for (std::size_t i = 0; i < n; ++i) {
         if (!(input.radius[i] > 0 && std::isfinite(input.radius[i]) && std::isfinite(input.measured[i])))
             throw std::runtime_error("Invalid fitted radius or ESD in measurement");
-        for (std::size_t j = 0; j <= i; ++j) {
+        for (std::size_t j = diagonal_only ? i : 0; j <= i; ++j) {
             const double value = input.covariance[i * n + j];
             if (!std::isfinite(value) || value != input.covariance[j * n + i])
                 throw std::runtime_error("Fitted ESD covariance must be finite and symmetric");

@@ -1,20 +1,17 @@
-"""Posterior component curves and the table consumed by the fit plot."""
+"""Generate and restore the joint ESD curve draws."""
 
 from dataclasses import dataclass
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 import numpy as np
+
+from esd_archive import CurveArchive
 
 COMPONENTS = ("stellar", "one_halo", "two_halo", "total")
 PERCENTILES = (2.5, 16, 50, 84, 97.5)
 COLUMNS = ("best", "p2p5", "p16", "p50", "p84", "p97p5")
 
 
-# ==========================================
-# Class: Profiles
-# Method: Keep one best curve and five marginal percentiles per radius and component.
-# ==========================================
 @dataclass(frozen=True)
 class Profiles:
     radius: np.ndarray
@@ -22,78 +19,67 @@ class Profiles:
     quantiles: np.ndarray
 
 
-# ==========================================
-# Function: write_atomic
-# Method: Close a complete product in the output directory before publishing its final name.
-# ==========================================
-def write_atomic(path, mode, writer):
-    path = Path(path)
-    with TemporaryDirectory(dir=path.parent, prefix=f".{path.name}.") as directory:
-        temp = Path(directory) / "product"
-        with temp.open(mode) as stream:
-            writer(stream)
-        temp.replace(path)
+def stellar_profile(radius, stellar_mass):
+    return stellar_mass / (np.pi*radius*radius*1e12)
 
 
-# ==========================================
-# Function: curve_array
-# Method: Compute the three terms and their sum for every supplied joint parameter draw.
-# ==========================================
-def curve_array(model, theta, radius, two_halo):
-    terms = model.components(theta, radius, two_halo)
-    return np.stack((*terms, sum(terms)), axis=-1)
-
-
-# ==========================================
-# Function: evaluate_profiles
-# Method: Evaluate a reproducible subset on a smooth grid that also includes all fitted radii.
-# ==========================================
-def evaluate_profiles(problem, posterior, best_index, limit, seed):
+def evaluate_profile_draws(problem, posterior, best_index, limit, seed):
     from esd_two_halo import TwoHalo
 
     count = min(limit, len(posterior))
     if count == len(posterior):
-        indices = np.arange(count, dtype=np.int64)
+        indices = np.arange(count, dtype="<u4")
     else:
         rng = np.random.default_rng(np.random.SeedSequence([seed, 4796]))
-        indices = np.sort(rng.choice(len(posterior), count, replace=False))
+        indices = np.sort(rng.choice(len(posterior), count, replace=False)).astype("<u4")
+
     smooth = np.geomspace(problem.r.min(), problem.r.max(), 180)
     radius = np.union1d(smooth, problem.r)
+    extra_radii = np.setdiff1d(radius, problem.r).astype("<f8", copy=False)
+    candidates = posterior[np.append(indices, best_index)]
+    _, keep, mapping = np.unique(candidates.view(np.uint64), axis=0,
+                                 return_index=True, return_inverse=True)
+    mapping = mapping.reshape(-1)
+    theta = candidates[keep]
+    rows = mapping[:-1].astype("<u4")
+    best_row = int(mapping[-1])
+
     model = problem.model
     two_halo = TwoHalo(radius, model.correlation, model.mean_density)
-    best = curve_array(model, posterior[best_index], radius, two_halo)[0]
-
-    draws = np.empty((count, len(radius), len(COMPONENTS)))
+    curves = np.empty((2, len(radius), len(theta)), dtype="<f8")
     batch = 256
-    for start in range(0, count, batch):
-        stop = min(count, start + batch)
-        draws[start:stop] = curve_array(model, posterior[indices[start:stop]], radius, two_halo)
-    if not (np.all(np.isfinite(best)) and np.all(np.isfinite(draws))):
+    for first in range(0, len(theta), batch):
+        last = min(len(theta), first + batch)
+        _, one, two = model.components(theta[first:last], radius, two_halo)
+        curves[0, :, first:last] = one.T
+        curves[1, :, first:last] = two.T
+    if not np.all(np.isfinite(curves)):
         raise ValueError("Non-finite ESD profile in the retained posterior")
-    profiles = Profiles(radius, best, np.percentile(draws, PERCENTILES, axis=0))
-    return profiles, indices, draws
+    return CurveArchive(len(radius), extra_radii, indices, rows, best_row, curves)
 
 
-# ==========================================
-# Function: write_profiles
-# Method: Save the plotted curves and the corresponding joint draws with their chain indices.
-# ==========================================
-def write_profiles(table_path, draws_path, profiles, indices, draws, center, seed, fit_id):
-    stats = np.concatenate((profiles.best[:, :, None], profiles.quantiles.transpose(1, 2, 0)), axis=2)
-    columns = ["R_Mpc_over_h"] + [f"{term}_{stat}" for term in COMPONENTS for stat in COLUMNS]
-    table = np.column_stack((profiles.radius, stats.reshape(len(profiles.radius), -1)))
-    header = f"fit_id={fit_id}\n" + " ".join(columns) + f"\ncenter={center}  DeltaSigma in h M_sun/pc^2"
-    write_atomic(table_path, "w", lambda stream: np.savetxt(stream, table, fmt="%.17g", header=header))
-    write_atomic(draws_path, "wb", lambda stream: np.savez_compressed(
-        stream, radius=profiles.radius, component_names=COMPONENTS, center=center,
-        chain_indices=indices, draws=draws, seed=seed, fit_id=fit_id,
-    ))
+def curve_terms(curves, observed_radii, stellar_mass):
+    radius = curves.radius(observed_radii)
+    one, two = curves.components
+    stellar = stellar_profile(radius, stellar_mass)[:, None]
+    return radius, stellar, one, two, (stellar + one) + two
 
 
-# ==========================================
-# Function: read_profiles
-# Method: Restore the published plot curves directly from the portable text table.
-# ==========================================
+def restore_draws(curves, observed_radii, stellar_mass):
+    """Restore the original (draw, radius, component) curves and global best curve."""
+    radius, stellar, one, two, total = curve_terms(curves, observed_radii, stellar_mass)
+    terms = (np.broadcast_to(stellar, one.shape), one, two, total)
+    draws = np.stack(tuple(term[:, curves.rows].T for term in terms), axis=-1)
+    best = np.stack(tuple(term[:, curves.best_row] for term in terms), axis=-1)
+    return radius, draws, best
+
+
+def total_profiles(curves, observed_radii, stellar_mass):
+    radius, _, _, _, total = curve_terms(curves, observed_radii, stellar_mass)
+    quantiles = np.percentile(total[:, curves.rows], PERCENTILES, axis=1)
+    return Profiles(radius, total[:, curves.best_row, None], quantiles[:, :, None])
+
+
 def read_profiles(path, fit_id=None):
     with Path(path).open() as stream:
         if fit_id is not None and stream.readline().strip() != f"# fit_id={fit_id}":

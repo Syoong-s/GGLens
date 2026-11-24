@@ -48,15 +48,16 @@ mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi "/path/to/esd.ini
 
 Omit the INI argument to use `esd.ini` in the launch directory. If that file is absent, the program uses its built-in defaults. Relative paths inside the INI start from the launch directory.
 
-With the example settings, the ESD measurement files go in `results/measurement/`. The five-parameter fit tables, archives, and figure go in `results/`. Use a distinct `output` name or `output-dir` for each sample or fit you want to keep. [Result files](RESULTS.md)
+With the example settings, the stage archives go in `results/measurement/` and `results/fit/`. The final ESD figure, ESD table and posterior figure go in `results/`. Use a distinct `output` name or `output-dir` for each sample or fit you want to keep. [Result files](RESULTS.md)
 
 ## 4. Run the stages separately
 
-Use `--stage` to override `[run] stage` for a launch. The fit command below reads the measurement saved by the first command and needs only its `*_fit_input.dat` file.
+Use `--stage` to override `[run] stage` for a launch. The fit command reads the measurement snapshot. The pull command reads both archives and can be rerun when the catalogs are offline. It needs NumPy and Matplotlib.
 
 ```sh
 mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi --stage measure "/path/to/esd.ini"
 mpirun -np "$SLURM_NTASKS" /path/to/FQ_GGLens/code/esd_bcg_mpi --stage fit "/path/to/esd.ini"
+mpirun -np 1 /path/to/FQ_GGLens/code/esd_bcg_mpi --stage pull "/path/to/esd.ini"
 ```
 
 To reuse the measurement in another output directory, make a fit-only INI and launch it with the same executable.
@@ -67,7 +68,7 @@ stage = fit
 output-dir = refits/bcg
 
 [fit]
-input = results/measurement/ESD_results_fit_input.dat
+input = results/measurement/ESD_results_measurement.bin
 ```
 
-The saved input supplies the measured radii, ESD, covariance, center, lens statistics, and cosmology. Set any sampling changes in `[fit]` and any figure changes in `[plots]`. For measurements from earlier versions, see how to pass the ESD table and its covariance. [Fit input settings](CONFIGURATION.md#fit-and-figure)
+The saved snapshot supplies the ESD, jackknife estimates, center, lens statistics, and cosmology. Set sampling changes in `[fit]` and figure changes in `[plots]`. The new fit records the snapshot location so `pull` can use it from the refit directory. [Fit input settings](CONFIGURATION.md#fit-and-figure)

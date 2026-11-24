@@ -11,6 +11,8 @@ __pycache__/
 /esd.ini
 /shear_catalogs.list
 /results/
+/measurement/
+/fit/
 /.bcg_scratch/
 /lens_cache.dat
 /ESD_results.dat

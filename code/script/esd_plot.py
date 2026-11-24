@@ -1,7 +1,11 @@
 """Plotting utilities for the fitted ESD and optional table comparison."""
 
+from contextlib import ExitStack
+import fcntl
+import json
 import os
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 
@@ -115,12 +119,56 @@ def render_fit(radius, measured, covariance, profiles, chi2, dof, path, title):
     save_figure(fig, path, 220)
 
 
-# ==========================================
-# Function: render_saved_fit
-# Method: Reproduce the fit plot from one result prefix and its saved plot data.
-# ==========================================
-def render_saved_fit(prefix, path):
-    import json
+def posterior_percentiles(samples, weights):
+    order = np.argsort(samples)
+    cumulative = np.cumsum(weights[order], dtype=np.int64)
+    positions = (cumulative[-1] - 1) * np.array([.16, .5, .84])
+    low = samples[order[np.searchsorted(cumulative, np.floor(positions), side="right")]]
+    high = samples[order[np.searchsorted(cumulative, np.ceil(positions), side="right")]]
+    fraction = positions - np.floor(positions)
+    return np.where(fraction < .5, low + (high - low)*fraction,
+                    high - (high - low)*(1 - fraction))
+
+
+def render_posterior(samples, weights, path):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    labels = (r"$\log_{10} M_{180m}$", r"$c$", r"$f_{\rm cen}$", r"$R_{\rm sig}/r_{180m}$", r"$b_h$")
+    size = len(labels)
+    edges = [np.histogram_bin_edges(values, bins=36) for values in samples]
+    fig, axes = plt.subplots(size, size, figsize=(10.5, 10))
+    for i, label in enumerate(labels):
+        for j in range(size):
+            ax = axes[i, j]
+            if j > i:
+                ax.set_axis_off()
+                continue
+            if i == j:
+                counts, _ = np.histogram(samples[i], bins=edges[i], weights=weights)
+                ax.stairs(counts / counts.sum(), edges[i], fill=True, color="#83b0dc")
+                low, median, high = posterior_percentiles(samples[i], weights)
+                for location, style in ((low, "--"), (median, "-"), (high, "--")):
+                    ax.axvline(location, color="#123b65", linestyle=style, linewidth=1)
+                ax.set_title(f"{label}  {median:.4g} [{low:.4g}, {high:.4g}]", fontsize=9)
+                ax.set_yticks([])
+            else:
+                density, _, _ = np.histogram2d(samples[j], samples[i], bins=(edges[j], edges[i]), weights=weights)
+                ax.pcolormesh(edges[j], edges[i], density.T, cmap="Blues", shading="auto")
+                if j == 0:
+                    ax.set_ylabel(label)
+                else:
+                    ax.tick_params(labelleft=False)
+            if i == size - 1:
+                ax.set_xlabel(labels[j])
+                ax.tick_params(axis="x", labelrotation=35)
+            else:
+                ax.tick_params(labelbottom=False)
+    save_figure(fig, path, 180)
+
+
+def read_legacy_fit(prefix, posterior=False):
     from esd_profiles import read_profiles
 
     summary = json.loads(Path(f"{prefix}_fit.json").read_text())
@@ -138,5 +186,64 @@ def render_saved_fit(prefix, path):
         if (np.any(keep >= len(profiles.radius)) or not np.array_equal(profiles.radius[keep], obs)
                 or not np.array_equal(profiles.best[keep, -1], summary["fitted_profile"]["total"])):
             raise ValueError("Fit summary and plotted best-fit values disagree")
-        render_fit(obs, chain["measured"], chain["covariance"], profiles, summary["chi2"],
-                   summary["degrees_of_freedom"], path, summary["plot_title"])
+        samples = chain["posterior"].reshape(-1, 5).T if posterior else None
+        return summary, profiles, (obs, chain["measured"], chain["covariance"]), samples
+
+
+def render_saved_fit(prefix, path):
+    summary, profiles, observed, _ = read_legacy_fit(prefix)
+    render_fit(*observed, profiles, summary["chi2"], summary["degrees_of_freedom"], path, summary["plot_title"])
+
+
+def open_saved_fit(archive, legacy_base):
+    from esd_archive import load_fit
+
+    archive = Path(archive)
+    if archive.is_symlink() or archive.exists():
+        fit = load_fit(archive)
+        chain, _ = fit
+        return fit, chain.measurement_path, chain.measurement_id
+    if Path(f"{legacy_base}_fit.json").is_file():
+        return read_legacy_fit(legacy_base, posterior=True), "", None
+    raise FileNotFoundError(f"No completed fit archive at {archive}")
+
+
+def publish_saved_fit(saved, paths, radii, measured, covariance, context, table):
+    from esd_archive import lock_directory
+    from esd_profiles import total_profiles
+
+    radii = np.asarray(radii)
+    measured = np.asarray(measured)
+    covariance = np.asarray(covariance).reshape((len(radii), len(radii)))
+    title = context["title"]
+    if len(saved) == 2:
+        chain, draws = saved
+        _, log_probability = chain.best()
+        chi2, dof = -2 * log_probability, len(radii) - 5
+        profiles = total_profiles(draws, radii, context["stellar_mass"])
+        samples, weights = chain.states[:5], chain.weights
+        title = title or chain.title or f'{context["center"].upper()}-centered group lensing'
+    else:
+        summary, profiles, observed, samples = saved
+        if (context["center"] != summary["center"] or
+                any(not np.array_equal(a, b) for a, b in zip(observed, (radii, measured, covariance)))):
+            raise ValueError("Legacy fit and measurement contain different ESD data")
+        chi2, dof = summary["chi2"], summary["degrees_of_freedom"]
+        title = title or summary["plot_title"]
+        weights = np.ones(samples.shape[1], dtype=np.int64)
+
+    destinations = {name: Path(path) for name, path in paths.items()}
+    with ExitStack() as cleanup:
+        staged = {}
+        for name, path in destinations.items():
+            if path.is_dir():
+                raise IsADirectoryError(path)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            directory = cleanup.enter_context(TemporaryDirectory(dir=path.parent, prefix=f".{path.name}."))
+            staged[name] = Path(directory) / path.name
+        staged["table"].write_bytes(table)
+        render_fit(radii, measured, covariance, profiles, chi2, dof, staged["esd"], title)
+        render_posterior(samples, weights, staged["posterior"])
+        with lock_directory(destinations["table"].parent, fcntl.LOCK_EX):
+            for name, path in destinations.items():
+                os.replace(staged[name], path)

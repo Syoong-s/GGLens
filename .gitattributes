@@ -10,6 +10,7 @@
 /code/script -export-ignore
 /code/script/esd_nfw.py -export-ignore
 /code/script/esd_two_halo.py -export-ignore
+/code/script/esd_archive.py -export-ignore
 /code/script/esd_profiles.py -export-ignore
 /code/script/esd_plot.py -export-ignore
 /code/script/esd_fit.py -export-ignore

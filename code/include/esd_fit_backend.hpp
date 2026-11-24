@@ -20,5 +20,8 @@ public:
     void setup(const FitInput &input, const std::vector<double> &corr);
     FitChain sample(const Config &cfg, int ensemble);
     void finish(const FitChain &chain, const Config &cfg, const FitInput &input);
+    void pull(const Config &cfg);
 };
+
+std::unique_ptr<FitBackend> fit_esd(FitInput input, const Config &cfg, MPI_Comm comm);
 } // namespace bcg_esd

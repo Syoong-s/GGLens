@@ -6,6 +6,7 @@
 #include "esd_nfw_source.inc"
 #include "esd_two_halo_source.inc"
 #include "esd_plot_source.inc"
+#include "esd_archive_source.inc"
 #include "esd_profiles_source.inc"
 #include "esd_fit_source.inc"
 
@@ -20,7 +21,7 @@ using Object = std::unique_ptr<PyObject, decltype(&Py_DecRef)>;
 Object checked(PyObject *raw) {
     if (!raw) {
         PyErr_Print();
-        throw std::runtime_error("Embedded ESD fit failed; see Python traceback");
+        throw std::runtime_error("Embedded ESD Python stage failed; see traceback");
     }
     return Object(raw, &Py_DecRef);
 }
@@ -111,11 +112,13 @@ FitBackend::FitBackend(const Config &cfg) : runtime_(std::make_unique<Runtime>()
         auto path = checked(PyUnicode_DecodeFSDefault(cfg.fit_python_path.c_str()));
         if (PyList_Insert(PySys_GetObject("path"), 0, path.get()) != 0) checked(nullptr);
     }
-    load_module("esd_nfw", esd_nfw_source);
-    load_module("esd_two_halo", esd_two_halo_source);
+    load_module("esd_archive", esd_archive_source);
     load_module("esd_profiles", esd_profiles_source);
-    load_module("esd_plot", esd_plot_source);
-    runtime_->module = load_module("esd_fit", esd_fit_source);
+    if (cfg.stage != Stage::pull) {
+        load_module("esd_nfw", esd_nfw_source);
+        load_module("esd_two_halo", esd_two_halo_source);
+        runtime_->module = load_module("esd_fit", esd_fit_source);
+    }
 }
 
 FitBackend::~FitBackend() = default;
@@ -159,39 +162,57 @@ FitChain FitBackend::sample(const Config &cfg, int ensemble) {
 
 // ==========================================
 // Function: finish
-// Method: Pass product paths and metadata for final posterior export and rendering.
+// Method: Publish the complete retained chain and curve draws for a later pull.
 // ==========================================
 void FitBackend::finish(const FitChain &chain, const Config &cfg, const FitInput &input) {
     const auto samples = packed(chain.samples);
     const auto stats = packed(chain.diagnostics);
     const auto shape = checked(Py_BuildValue("(iii)", cfg.fit_ensembles,
                                             cfg.fit_steps - cfg.fit_burn, cfg.fit_walkers));
-    const auto paths = checked(Py_BuildValue("{s:s,s:s,s:s,s:s,s:s}",
-        "summary", cfg.summary_output.c_str(), "chain", cfg.chain_output.c_str(),
-        "profiles", cfg.profile_output.c_str(), "draws", cfg.profile_draws_output.c_str(),
-        "plot", cfg.fit_plot.c_str()));
-    const auto bins = checked(PyList_New(input.bins.size()));
-    for (std::size_t i = 0; i < input.bins.size(); ++i)
-        PyList_SET_ITEM(bins.get(), i, checked(PyLong_FromLong(input.bins[i])).release());
-    const auto &sample = input.metadata.sample;
+    const auto source = checked(PyUnicode_DecodeFSDefault(input.measurement_path.c_str()));
+    const auto archive = checked(PyUnicode_DecodeFSDefault(cfg.fit_archive.c_str()));
     const auto &c = input.metadata.cosmology;
-    const auto cosmology = checked(Py_BuildValue("{s:d,s:d,s:d,s:d,s:d,s:d}",
-        "omega_m", c.omega_m, "h", c.h, "sigma8", c.sigma8, "omega_b_h2", c.omega_b_h2,
-        "spectral_index", c.spectral_index, "neutrino_mass_eV", c.neutrino_mass));
-    const char *center = bcg::center_name(input.metadata.center);
-    std::string title = cfg.plot_title;
-    if (title.empty()) {
-        title = center;
-        for (char &letter : title) letter = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
-        title += "-centered group lensing";
-    }
-    const auto context = checked(Py_BuildValue("{s:s,s:d,s:L,s:i,s:i,s:i,s:i,s:s,s:O,s:O}",
-        "center", center, "redshift", sample.redshift,
-        "n_lenses", static_cast<long long>(sample.n_lenses), "regions", sample.regions,
-        "burn_in", cfg.fit_burn, "profile_draws", cfg.fit_profile_draws, "seed", cfg.fit_seed,
-        "title", title.c_str(), "fit_bins", bins.get(), "cosmology", cosmology.get()));
+    const auto legacy_cosmology = input.legacy_cosmology ? checked(Py_BuildValue("(dddddd)",
+        c.omega_m, c.h, c.sigma8, c.omega_b_h2, c.spectral_index, c.neutrino_mass)) : checked(PyTuple_New(0));
+    const auto context = checked(Py_BuildValue("{s:K,s:O,s:i,s:i,s:i,s:s,s:O}",
+        "measurement_id", static_cast<unsigned long long>(input.measurement_id),
+        "measurement_path", source.get(), "burn_in", cfg.fit_burn,
+        "profile_draws", cfg.fit_profile_draws, "seed", cfg.fit_seed, "title", cfg.plot_title.c_str(),
+        "legacy_cosmology", legacy_cosmology.get()));
     checked(PyObject_CallMethod(runtime_->module.get(), "finish_fit", "OOOOOO",
                                runtime_->problem.get(), samples.get(), stats.get(),
-                               shape.get(), paths.get(), context.get()));
+                               shape.get(), archive.get(), context.get()));
+}
+
+void FitBackend::pull(const Config &cfg) {
+    const auto plot = load_module("esd_plot", esd_plot_source);
+    const auto archive = checked(PyUnicode_DecodeFSDefault(cfg.fit_archive.c_str()));
+    const auto legacy_base = checked(PyUnicode_DecodeFSDefault(cfg.legacy_fit_base.c_str()));
+    const auto opened = checked(PyObject_CallMethod(plot.get(), "open_saved_fit", "OO",
+                                                   archive.get(), legacy_base.get()));
+    const auto source = checked(PyUnicode_EncodeFSDefault(PyTuple_GetItem(opened.get(), 1)));
+    auto *id = PyTuple_GetItem(opened.get(), 2);
+    const bool legacy = id == Py_None;
+    const auto data = load_pull_input(cfg, PyBytes_AS_STRING(source.get()), legacy);
+    const auto &input = data.fit;
+    if (!legacy) {
+        const auto expected = PyLong_AsUnsignedLongLong(id);
+        if (PyErr_Occurred()) checked(nullptr);
+        if (expected != input.measurement_id)
+            throw std::runtime_error("Fit was made from a different measurement snapshot");
+    }
+    const auto radius = as_list(input.radius);
+    const auto measured = as_list(input.measured);
+    const auto covariance = as_list(input.covariance);
+    const auto table = checked(PyBytes_FromStringAndSize(data.esd_table.data(), data.esd_table.size()));
+    const auto export_table = checked(PyUnicode_DecodeFSDefault(cfg.output.c_str()));
+    const auto export_esd = checked(PyUnicode_DecodeFSDefault(cfg.fit_plot.c_str()));
+    const auto export_posterior = checked(PyUnicode_DecodeFSDefault(cfg.posterior_plot.c_str()));
+    const auto paths = checked(Py_BuildValue("{s:O,s:O,s:O}", "table", export_table.get(),
+                                           "esd", export_esd.get(), "posterior", export_posterior.get()));
+    const auto context = checked(Py_BuildValue("{s:s,s:s,s:d}", "title", cfg.plot_title.c_str(),
+        "center", bcg::center_name(input.metadata.center), "stellar_mass", input.metadata.sample.stellar_mass));
+    checked(PyObject_CallMethod(plot.get(), "publish_saved_fit", "OOOOOOO", PyTuple_GetItem(opened.get(), 0),
+                               paths.get(), radius.get(), measured.get(), covariance.get(), context.get(), table.get()));
 }
 } // namespace bcg_esd

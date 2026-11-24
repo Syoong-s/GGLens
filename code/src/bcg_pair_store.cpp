@@ -6,20 +6,25 @@ namespace bcg {
 // Method: Limit all bin write buffers jointly through the caller's divided quota.
 // ==========================================
 PairStore::PairStore(const std::string &file, std::size_t read_bytes, std::size_t write_bytes,
-                     std::size_t lenses, int regions)
-    : file_(file), read_bytes_(read_bytes),
-      writer_(new BinaryWriter<PairRecord>(file, write_bytes)),
-      present(lenses, 0), region_count(regions, 0) {}
+                     std::size_t lenses, int regions, bool field_distortion)
+    : file_(file), read_bytes_(read_bytes), field_distortion_(field_distortion),
+      present(lenses, 0), region_count(regions, 0) {
+    if (field_distortion_) fd_writer_ = std::make_unique<BinaryWriter<FdRecord>>(file, write_bytes);
+    else writer_ = std::make_unique<BinaryWriter<PairRecord>>(file, write_bytes);
+}
 
 // ==========================================
 // Function: PairStore::append
 // Method: Write each selected pair once and retain only small radial/lens metadata.
 // ==========================================
 void PairStore::append(const PairRecord &pair, double radius, int region) {
-    if (!writer_) throw std::runtime_error("Pair spool is already closed");
+    if (!writer_ && !fd_writer_) throw std::runtime_error("Pair spool is already closed");
     if (count == std::numeric_limits<std::int64_t>::max())
         throw std::runtime_error("Pair count exceeds 64-bit limit");
-    writer_->append(pair); ++count; log_radius_sum += std::log(radius);
+    if (field_distortion_) fd_writer_->append({pair.gt, pair.det});
+    else writer_->append(pair);
+    ++count;
+    log_radius_sum += std::log(radius);
     present.at(static_cast<std::size_t>(pair.lens)) = 1; ++region_count.at(region);
 }
 
@@ -29,6 +34,7 @@ void PairStore::append(const PairRecord &pair, double radius, int region) {
 // ==========================================
 void PairStore::finish() {
     if (writer_) { writer_->close(); writer_.reset(); }
+    if (fd_writer_) { fd_writer_->close(); fd_writer_.reset(); }
 }
 
 // ==========================================
@@ -37,6 +43,12 @@ void PairStore::finish() {
 // ==========================================
 bool PairStore::load_if_small(std::size_t bytes) {
     if (static_cast<std::uint64_t>(count) > bytes / sizeof(PairRecord)) return false;
+    if (field_distortion_) {
+        memory_.clear();
+        memory_.reserve(static_cast<std::size_t>(count));
+        if (count) scan_disk([&](const PairRecord &pair) { memory_.push_back(pair); });
+        return true;
+    }
     memory_.resize(static_cast<std::size_t>(count));
     if (!count) return true;
     std::ifstream in(file_, std::ios::binary);
@@ -53,14 +65,30 @@ bool PairStore::load_if_small(std::size_t bytes) {
 // ==========================================
 void PairStore::scan(const std::function<void(const PairRecord &)> &visit) const {
     if (!count) return;
-    if (!memory_.empty()) {
-        for (const auto &p : memory_) visit(p);
+    if (memory_.empty()) scan_disk(visit);
+    else for (const auto &p : memory_) visit(p);
+}
+
+void PairStore::scan_disk(const std::function<void(const PairRecord &)> &visit) const {
+    std::int64_t seen = 0;
+    if (field_distortion_) {
+        BinaryReader<FdRecord> in(file_, read_bytes_);
+        FdRecord record;
+        while (in.next(record)) {
+            if (seen == count) throw std::runtime_error("Pair spool has extra records: " + file_);
+            visit({record[0], 0, record[1], 0, 0, 0});
+            ++seen;
+        }
     } else {
         BinaryReader<PairRecord> in(file_, read_bytes_);
-        PairRecord p; std::int64_t seen = 0;
-        while (in.next(p)) { visit(p); ++seen; }
-        if (seen != count) throw std::runtime_error("Pair spool count changed: " + file_);
+        PairRecord pair;
+        while (in.next(pair)) {
+            if (seen == count) throw std::runtime_error("Pair spool has extra records: " + file_);
+            visit(pair);
+            ++seen;
+        }
     }
+    if (seen != count) throw std::runtime_error("Pair spool count changed: " + file_);
 }
 
 // ==========================================

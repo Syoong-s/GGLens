@@ -60,7 +60,7 @@ SelfCalibration::SelfCalibration(const Config &cfg, const bcg::ScratchSpace &scr
         for (int bin = 0; bin < cfg.selfcal_fd_bins; ++bin)
             cells_[component].emplace_back(new bcg::PairStore(
                 scratch.path("selfcal_" + std::to_string(component) + "_" + std::to_string(bin) + ".bin"),
-                1024*1024, bytes, 1, 1));
+                1024*1024, bytes, 1, 1, true));
     }
 }
 

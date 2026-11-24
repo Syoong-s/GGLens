@@ -4,7 +4,7 @@
 #include "bcg_pair_store.hpp"
 
 namespace bcg_esd {
-enum class Stage { all, measure, fit };
+enum class Stage { all, measure, fit, pull };
 inline constexpr int max_radial_bins = 256;
 
 struct CosmologyParameters {
@@ -37,10 +37,9 @@ struct Config {
     int fit_ensembles = defaults::fit_ensembles, fit_seed = defaults::fit_seed;
     int fit_profile_draws = defaults::fit_profile_draws;
     std::string fit_python_path = defaults::fit_python_path;
-    std::string fit_input_path, fit_input_output;
+    std::string fit_input_path, measurement_output, legacy_measurement, fit_archive, legacy_fit_base;
     std::string fit_plot = defaults::fit_plot, plot_title = defaults::plot_title;
-    std::string covariance_output, replica_output, summary_output, chain_output;
-    std::string profile_output, profile_draws_output;
+    std::string posterior_plot;
     bcg::LensColumns lens_columns = defaults::lens_columns;
     bcg::ExternalColumns external_columns = defaults::external_columns;
     bcg::Cuts cuts{defaults::cuts, defaults::excluded_ccds};
@@ -68,6 +67,8 @@ struct LensSummary {
 struct LensStack {
     std::vector<int> labels;
     LensSummary sample;
+    std::vector<int> groups_per_region;
+    std::int64_t photometry_selected = -1;
 };
 struct Result {
     double low = 0, high = 0, effective = std::numeric_limits<double>::quiet_NaN();
@@ -89,6 +90,24 @@ struct FitInput {
     } metadata;
     std::vector<int> bins; // Zero-based indices in the full measurement.
     std::vector<double> radius, measured, covariance; // Covariance in fitted-bin order.
+    std::uint64_t measurement_id = 0;
+    std::string measurement_path;
+    bool legacy_cosmology = false;
+};
+struct Measurement {
+    FitInput::Metadata metadata;
+    std::vector<Result> bins;
+    std::vector<int> groups_per_region;
+    bcg::ShearCalibration calibration;
+    std::int64_t sources_after_cuts = 0, calibration_sources = -1, photometry_selected = -1;
+    int requested_regions = 0, fd_bins = 0;
+    double fd_limit = 0;
+    bool fd_restored = false;
+    std::uint64_t id = 0;
+};
+struct PullInput {
+    FitInput fit;
+    std::string esd_table;
 };
 struct SelfCalibrationDiagnostics;
 Stage parse_stage(const std::string &name);
@@ -102,16 +121,18 @@ std::vector<double> radial_edges(const Config &cfg);
 std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     const std::vector<bcg::Lens> &lenses, const std::vector<std::string> &files,
     const bcg::ShearLayout &layout, Config &cfg, SelfCalibrationDiagnostics &diagnostics,
-    const bcg::ScratchSpace &scratch, MPI_Comm comm);
+    const bcg::ScratchSpace &scratch, std::int64_t &sources_after_cuts, MPI_Comm comm);
 Result measure_bin(bcg::PairStore &pairs, double low, double high, const LensStack &stack,
                    const Config &cfg, MPI_Comm comm);
-Covariance jackknife_covariance(std::vector<Result> &results, int regions);
+Covariance jackknife_covariance(std::vector<Result> &results, int regions, bool diagonal_only = false);
 FitInput make_fit_input(const std::vector<Result> &results, const Covariance &covariance,
                         const LensSummary &sample, bcg::Center center, const CosmologyParameters &cosmology);
 FitInput load_fit_input(const Config &cfg);
-void write_fit_input(std::ostream &out, const FitInput &input);
-void validate_fit_input(const FitInput &input);
-void write_results(const std::vector<Result> &results, const Covariance &covariance,
-                   const FitInput &input, const Config &cfg);
-void fit_esd(FitInput input, const Config &cfg, MPI_Comm comm);
+PullInput load_pull_input(const Config &cfg, const std::string &saved_measurement, bool legacy_fit);
+void validate_fit_input(const FitInput &input, bool diagonal_only = false);
+bool is_measurement_snapshot(const bcg::fs::path &path);
+Measurement read_measurement(const bcg::fs::path &path);
+void write_measurement(const bcg::fs::path &path, const Measurement &measurement);
+std::string format_esd_table(const Measurement &measurement, const std::string &source);
+void print_measurement_summary(const Measurement &measurement);
 } // namespace bcg_esd

@@ -24,21 +24,25 @@ std::vector<double> radial_edges(const Config &cfg) {
 std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     const std::vector<bcg::Lens> &lenses,
     const std::vector<std::string> &files, const bcg::ShearLayout &layout, Config &cfg,
-    SelfCalibrationDiagnostics &diagnostics, const bcg::ScratchSpace &scratch, MPI_Comm comm) {
+    SelfCalibrationDiagnostics &diagnostics, const bcg::ScratchSpace &scratch,
+    std::int64_t &sources_after_cuts, MPI_Comm comm) {
     int rank = 0; MPI_Comm_rank(comm, &rank);
     const auto budget = cfg.memory_bytes();
     const bool need_bar = cfg.cuts.bar_enabled();
+    const bool need_spool = need_bar || cfg.self_calibrate;
     const auto source_file = scratch.path("quality_sources.bin");
     const auto bar_file = scratch.path("quality_bars.bin");
-    {
-        bcg::BinaryWriter<bcg::Source> sources(source_file, 1024 * 1024);
+    const auto restore = [&](bcg::Source source) {
+        if (cfg.fd_corrected) bcg::restore_raw_shear(source);
+        return source;
+    };
+    if (need_spool) {
+        bcg::BinaryWriter<bcg::SourceRecord> sources(source_file, 1024 * 1024);
         std::unique_ptr<bcg::BinaryWriter<bcg::BarDatum>> bars;
         if (need_bar) bars.reset(new bcg::BinaryWriter<bcg::BarDatum>(bar_file, 1024 * 1024));
         bcg::for_each_local_source(files, cfg.cuts, layout, comm,
             [&](const bcg::Source &s, const bcg::BarDatum &b) {
-                auto raw = s;
-                if (cfg.fd_corrected) bcg::restore_raw_shear(raw);
-                sources.append(raw);
+                sources.append(restore(s));
                 if (bars) bars->append(b);
             });
         sources.close(); if (bars) bars->close();
@@ -130,23 +134,31 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     // Function: scan_sources
     // Method: Read unchanged post-bar rows; apply calibration only during the final ESD pass.
     // ==========================================
+    const auto accept = [&](bcg::Source source) {
+        if (!collect_fd) cfg.calibration.apply(source);
+        source.chi = cosmo.chi(source.zp);
+        const auto xyz = bcg::sky_xyz(source.ra, source.dec);
+        std::copy(xyz.begin(), xyz.end(), source.xyz);
+        chunk.push_back(source); ++local_sources;
+        if (chunk.size() == capacity) pair_chunk();
+    };
     const auto scan_sources = [&] {
         local_sources = 0;
-        bcg::BinaryReader<bcg::Source> sources(source_file, 1024 * 1024);
-        std::unique_ptr<bcg::BinaryReader<bcg::BarDatum>> bars;
-        if (need_bar) bars.reset(new bcg::BinaryReader<bcg::BarDatum>(bar_file, 1024 * 1024));
-        bcg::Source source; bcg::BarDatum bar;
-        while (sources.next(source)) {
-            if (bars && !bars->next(bar)) throw std::runtime_error("Source/bar spool lengths differ");
-            if (bars && !fitted.accepts(bar)) continue;
-            if (!collect_fd) cfg.calibration.apply(source);
-            source.chi = cosmo.chi(source.zp);
-            const auto xyz = bcg::sky_xyz(source.ra, source.dec);
-            std::copy(xyz.begin(), xyz.end(), source.xyz);
-            chunk.push_back(source); ++local_sources;
-            if (chunk.size() == capacity) pair_chunk();
+        if (need_spool) {
+            bcg::BinaryReader<bcg::SourceRecord> sources(source_file, 1024 * 1024);
+            std::unique_ptr<bcg::BinaryReader<bcg::BarDatum>> bars;
+            if (need_bar) bars.reset(new bcg::BinaryReader<bcg::BarDatum>(bar_file, 1024 * 1024));
+            bcg::SourceRecord record;
+            bcg::BarDatum bar;
+            while (sources.next(record)) {
+                if (bars && !bars->next(bar)) throw std::runtime_error("Source/bar spool lengths differ");
+                if (!bars || fitted.accepts(bar)) accept(bcg::Source(record));
+            }
+            if (bars && bars->next(bar)) throw std::runtime_error("Source/bar spool lengths differ");
+        } else {
+            bcg::for_each_local_source(files, cfg.cuts, layout, comm,
+                [&](const bcg::Source &source, const bcg::BarDatum &) { accept(restore(source)); });
         }
-        if (bars && bars->next(bar)) throw std::runtime_error("Source/bar spool lengths differ");
         pair_chunk();
     };
     if (selfcal) {
@@ -161,15 +173,16 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     if (!rank) std::cout << "Writing bounded pair spools" << std::endl;
     scan_sources();
     std::vector<bcg::Source>().swap(chunk);
-    bcg::fs::remove(source_file); if (need_bar) bcg::fs::remove(bar_file);
+    if (need_spool) bcg::fs::remove(source_file);
+    if (need_bar) bcg::fs::remove(bar_file);
     std::int64_t local_pairs = 0;
     for (auto &bin : bins) { bin->finish(); local_pairs += bin->count; }
-    std::int64_t total_sources = 0, total_pairs = 0;
-    MPI_Allreduce(&local_sources, &total_sources, 1, MPI_INT64_T, MPI_SUM, comm);
+    std::int64_t total_pairs = 0;
+    MPI_Allreduce(&local_sources, &sources_after_cuts, 1, MPI_INT64_T, MPI_SUM, comm);
     MPI_Allreduce(&local_pairs, &total_pairs, 1, MPI_INT64_T, MPI_SUM, comm);
-    if (!rank) std::cout << "Sources after cuts: " << total_sources << '\n'
+    if (!rank) std::cout << "Sources after cuts: " << sources_after_cuts << '\n'
                          << "Lens-source pairs: " << total_pairs << std::endl;
-    if (!total_sources) throw std::runtime_error("No sources survive quality cuts");
+    if (!sources_after_cuts) throw std::runtime_error("No sources survive quality cuts");
     if (!total_pairs) throw std::runtime_error("No lens-source pairs");
     return bins;
 }
