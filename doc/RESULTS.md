@@ -5,6 +5,7 @@ With `[run] output-dir = results` and `output = ESD_results.dat`, a successful `
 | File | Contents |
 | --- | --- |
 | `measurement/ESD_results_measurement.bin` | All measured bins, both sets of jackknife replicas, lens-stack and calibration statistics, and cosmology |
+| `measurement/ESD_results_fd_points.dat` | FD test points for both Cartesian components when self-calibration is enabled |
 | `fit/ESD_results/ESD_results_chain.bin` | All retained five-parameter samples and log probabilities in their original ensemble, step, and walker order, plus sampling diagnostics and the measurement reference |
 | `fit/ESD_results/ESD_results_profile_draws.bin` | Joint ESD curve predictions at the selected chain positions and at the global best fit |
 | `ESD_results_fit.png` | Tangential ESD used in the fit, best-fit stellar, centered one-halo, off-center one-halo, two-halo and total curves, and the total's 68% and 95% posterior bands |
@@ -14,6 +15,20 @@ With `[run] output-dir = results` and `output = ESD_results.dat`, a successful `
 `measure` writes the measurement snapshot. `fit` writes the two fit archives. `pull` reads those saved products and generates the three files in the result directory. The current fit directory is a relative symlink to the committed pair, so copy the fit directory with its symlink target when moving a run.
 
 The binary snapshots preserve double precision. The measurement includes the source count after cuts, the number of all-radius sources used for self-calibration, the effective calibration coefficients, and the BCG photometry selection count when available. The total number of lens–source pairs is the sum of the per-bin counts. The jackknife replicas supply the fit covariance and both sets of ESD errors.
+
+## FD test points
+
+With `[calibration] self-calibrate = true`, `measure` and `all` save the FD points as soon as the bin calculations finish. The table is available if the subsequent line fit or calibration validation fails.
+
+| Columns | Contents |
+| --- | --- |
+| `component`, `bin` | Component 1 for `g1/gf1` or 2 for `g2/gf2`, and the bin number starting at 1 |
+| `gf_low`, `gf_high`, `gf_mean` | Lower and upper FD bin edges and the mean FD of the sources in the bin |
+| `shear`, `sigma` | PDF_SYM shear estimate and its curvature-based error bar |
+| `n_sources` | Number of selected source rows in the bin, counting each row once per component across all matched lenses |
+| `status` | `0` for a valid estimate, `1` for too few sources, or `2` for an invalid PDF_SYM fit |
+
+An empty bin has `nan` for `gf_mean`. Bins with status `1` or `2` have `nan` for `shear` and `sigma`.
 
 ## ESD data table
 

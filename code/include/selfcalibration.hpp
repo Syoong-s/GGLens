@@ -22,16 +22,6 @@ struct FdLineFit {
 };
 
 // ==========================================
-// Structure: SelfCalibrationDiagnostics
-// Method: Keep fitted data on rank zero for the final in-process renderer.
-// ==========================================
-struct SelfCalibrationDiagnostics {
-    std::array<std::vector<FdCalibrationPoint>, 2> points;
-    std::array<FdLineFit, 2> fits;
-    std::int64_t selected = 0;
-};
-
-// ==========================================
 // Structure: FdPdfFit
 // Method: Return the original cochko zero-centered PDF fit or an invalid point.
 // ==========================================
@@ -58,7 +48,7 @@ class SelfCalibration {
 public:
     SelfCalibration(const Config &cfg, const bcg::ScratchSpace &scratch);
     void append(const bcg::Source &source);
-    bcg::ShearCalibration finish(MPI_Comm comm, SelfCalibrationDiagnostics &diagnostics);
+    bcg::ShearCalibration finish(MPI_Comm comm);
     // ==========================================
     // Function: selected_sources
     // Method: Expose the globally reduced unique all-R row count for ESD provenance.

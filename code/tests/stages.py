@@ -101,6 +101,44 @@ def load_measurement(path):
     return groups, z, stellar_mass, fields, edges, rows, replicas.reshape(2, n, regions)
 
 
+def check_fd_points(root, run):
+    inputs = root / "inputs"
+    lens_ras = np.loadtxt(inputs / "galaxies.dat", usecols=1)[:2]
+    counts = np.array([2400, 0, 2400, 4, 2400])
+    edges = np.linspace(-0.0015, 0.0015, len(counts) + 1)
+    centers = (edges[:-1] + edges[1:]) / 2
+    expected_counts = np.concatenate((counts, counts[::-1]))
+    valid = expected_counts >= 6
+    settings = CATALOG_SETTINGS.replace("inputs/shear.list", "inputs/fd.list").replace(
+        "self-calibrate = false", f"self-calibrate = true\nselfcal-fd-bins = {len(counts)}"
+    )
+    for name, gain2 in (("fd-valid", 0.9), ("fd-rejected", -0.9)):
+        (inputs / "fd.list").write_text(f"{name}.dat\n")
+        rng = np.random.default_rng(3817)
+        with (inputs / f"{name}.dat").open("w") as stream:
+            stream.write("# ra dec zp g1 g2 de h1 h2 gf1 gf2\n")
+            for bin_index, (field, count) in enumerate(zip(centers, counts)):
+                noise = rng.normal(0, 0.025, (count // 2, 2))
+                for row, (noise1, noise2) in enumerate(np.concatenate((noise, -noise))):
+                    ra = lens_ras[row % 2] + 0.14 + 0.01 * bin_index + 2e-7 * row
+                    g1 = 1.1 * field + 0.0001 + noise1
+                    g2 = -gain2 * field - 0.0002 + noise2
+                    stream.write(f"{ra:.17g} 0 0.9 {g1:.17g} {g2:.17g} 1 0 0 {field:.17g} {-field:.17g}\n")
+        snapshot = measurement_path(root / name)
+        error = "m1,m2 > -1" if gain2 < 0 else None
+        run(name, f"[run]\nstage = measure\noutput-dir = {name}\noutput = sample.dat\n" + settings, error=error)
+        points = np.genfromtxt(snapshot.with_name("sample_fd_points.dat"), names=True)
+        np.testing.assert_array_equal(points["component"], np.repeat([1, 2], len(counts)))
+        np.testing.assert_array_equal(points["bin"], np.tile(np.arange(1, len(counts) + 1), 2))
+        np.testing.assert_array_equal(points["n_sources"], expected_counts)
+        np.testing.assert_array_equal(points["status"], ~valid)
+        np.testing.assert_allclose(points["gf_mean"], np.where(expected_counts, np.tile(centers, 2), np.nan),
+                                   atol=1e-15)
+        assert np.all(np.isfinite(points["shear"][valid])) and np.all(points["sigma"][valid] > 0)
+        assert np.all(np.isnan(points["shear"][~valid])) and np.all(np.isnan(points["sigma"][~valid]))
+        assert snapshot.is_file() == (error is None)
+
+
 def check_fit(reference, other, same_measurement=True):
     expected, expected_curves = load_fit(reference / "fit" / "sample")
     actual, curves = load_fit(other / "fit" / "sample")
@@ -227,6 +265,7 @@ def main():
 
         check_lossless_codec(root)
         write_inputs(root / "inputs")
+        check_fd_points(root, run)
         combined = root / "combined"
         run("combined", "[run]\noutput-dir = combined\noutput = sample.dat\ncache = combined/cache/lenses.dat\n"
             + CATALOG_SETTINGS + FIT_SETTINGS)
@@ -309,7 +348,7 @@ def main():
         run("bad-legacy", "[run]\nstage = fit\noutput-dir = bad\n" + FIT_SETTINGS + f"input = {bad_legacy}\n",
             error="Unsupported ESD fit input version")
 
-    print("Combined, split, lossless archive, and legacy ESD checks passed")
+    print("FD points, combined and split stages, lossless archive, and legacy ESD checks passed")
 
 
 if __name__ == "__main__":

@@ -292,19 +292,21 @@ void resolve_outputs(Config &c, int rank) {
         throw std::runtime_error("run.output must be a filename when run.output-dir is set");
 
     const path result_root = directory.empty() ? output.parent_path() : directory;
+    const path measurement_dir = result_root / "measurement";
     const auto filename = output.filename();
     const auto stem = output.stem().string();
     if (filename == "measurement" || filename == "fit")
         throw std::runtime_error("run.output conflicts with a stage directory: " + filename.string());
     c.output = (result_root / filename).string();
-    c.measurement_output = (result_root / "measurement" / (stem + "_measurement.bin")).string();
-    c.legacy_measurement = (result_root / "measurement" / filename).string();
+    c.measurement_output = (measurement_dir / (stem + "_measurement.bin")).string();
+    c.legacy_measurement = (measurement_dir / filename).string();
     c.fit_archive = (result_root / "fit" / stem).string();
     c.legacy_fit_base = (result_root / stem).string();
 
     const bool measures = c.stage == Stage::all || c.stage == Stage::measure;
     const bool renders = c.stage == Stage::all || c.stage == Stage::pull;
     if (measures) {
+        if (c.self_calibrate) c.fd_points_output = (measurement_dir / (stem + "_fd_points.dat")).string();
         if (!c.cache.empty() && c.center != bcg::Center::bcg) {
             const path cache(c.cache);
             c.cache = (cache.parent_path() / (cache.stem().string() + "_" +
@@ -337,6 +339,7 @@ void resolve_outputs(Config &c, int rank) {
         if (measures) {
             if (!renders) require_distinct(c.output);
             require_distinct(c.cache);
+            require_distinct(c.fd_points_output);
         }
     }
 }

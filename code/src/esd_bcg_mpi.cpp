@@ -1,6 +1,5 @@
 #include "bcg_esd.hpp"
 #include "esd_fit_backend.hpp"
-#include "selfcalibration.hpp"
 #include <iostream>
 
 namespace {
@@ -27,9 +26,8 @@ void measure(bcg_esd::Config &cfg, MPI_Comm comm) {
                          << "Scratch root: " << cfg.scratch_dir << std::endl;
     const auto lenses = bcg_esd::load_lenses(cfg, comm);
     bcg::ScratchSpace scratch(cfg.scratch_dir, comm);
-    bcg_esd::SelfCalibrationDiagnostics diagnostics;
     bcg_esd::Measurement measurement;
-    auto bins = bcg_esd::build_pair_spools(lenses, files, layout, cfg, diagnostics, scratch,
+    auto bins = bcg_esd::build_pair_spools(lenses, files, layout, cfg, scratch,
                                          measurement.sources_after_cuts, comm);
     auto stack = bcg_esd::make_lens_stack(lenses, bins, cfg, comm);
     const auto edges = bcg_esd::radial_edges(cfg);

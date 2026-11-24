@@ -1,7 +1,40 @@
 #include "selfcalibration.hpp"
+#include "bcg_archive.hpp"
 #include <iostream>
 
 namespace bcg_esd {
+namespace {
+void write_fd_points(const bcg::fs::path &path, const std::vector<double> &edges,
+                     const std::array<std::vector<FdCalibrationPoint>, 2> &points,
+                     std::int64_t selected) {
+    bcg::archive::publish(path, [&](const auto &temporary) {
+        std::ofstream out(temporary);
+        if (!out) throw std::runtime_error("Cannot write FD points: " + path.string());
+        out.exceptions(std::ios::badbit | std::ios::failbit);
+        out << "# component bin gf_low gf_high gf_mean shear sigma n_sources status\n"
+            << "# component 1 = g1/gf1, 2 = g2/gf2\n"
+            << "# Bin numbers start at 1. FD intervals use gf_low <= gf < gf_high.\n"
+            << "# status 0 = valid, 1 = too few sources, 2 = invalid PDF_SYM fit\n"
+            << "# sigma is the PDF_SYM curvature error\n"
+            << "# all_R_sources=" << selected << '\n'
+            << std::scientific << std::setprecision(std::numeric_limits<double>::max_digits10 - 1);
+
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        for (std::size_t component = 0; component < points.size(); ++component) {
+            for (std::size_t bin = 0; bin < points[component].size(); ++bin) {
+                const auto &p = points[component][bin];
+                const bool valid = p.status == 0;
+                out << component + 1 << ' ' << bin + 1 << ' '
+                    << edges[bin] << ' ' << edges[bin + 1] << ' ' << (p.count ? p.field : nan) << ' '
+                    << (valid ? p.value : nan) << ' ' << (valid ? p.sigma : nan) << ' '
+                    << p.count << ' ' << p.status << '\n';
+            }
+        }
+        out.close();
+    });
+}
+} // namespace
+
 // ==========================================
 // Function: fit_selfcal_line
 // Method: Fit g=(1+m)*gf+c with absolute-sigma weights and centered, scaled sums.
@@ -85,9 +118,9 @@ void SelfCalibration::append(const bcg::Source &source) {
 
 // ==========================================
 // Function: SelfCalibration::finish
-// Method: Measure only the Cartesian all-R union, fit both lines and retain plot data on rank zero.
+// Method: Save the Cartesian all-R bin measurements before fitting and validating both lines.
 // ==========================================
-bcg::ShearCalibration SelfCalibration::finish(MPI_Comm comm, SelfCalibrationDiagnostics &diagnostics) {
+bcg::ShearCalibration SelfCalibration::finish(MPI_Comm comm) {
     int rank = 0; MPI_Comm_rank(comm, &rank);
     MPI_Allreduce(&local_selected_, &total_selected_, 1, MPI_INT64_T, MPI_SUM, comm);
     if (!total_selected_) throw std::runtime_error("Self-calibration has no selected all-R source rows");
@@ -115,10 +148,11 @@ bcg::ShearCalibration SelfCalibration::finish(MPI_Comm comm, SelfCalibrationDiag
     }
     std::array<double, 4> coefficients{};
     if (!rank) {
+        write_fd_points(cfg_.fd_points_output, edges_, points, total_selected_);
+        std::cout << "Saved FD calibration points: " << cfg_.fd_points_output << std::endl;
         const std::array<FdLineFit, 2> fits{fit_selfcal_line(points[0]), fit_selfcal_line(points[1])};
         bcg::ShearCalibration fitted{fits[0].m, fits[1].m, fits[0].c, fits[1].c};
         fitted.validate();
-        diagnostics = {std::move(points), fits, total_selected_};
         coefficients = {fitted.m1, fitted.m2, fitted.c1, fitted.c2};
         std::cout << "Self-calibration all-R unique rows=" << total_selected_ << "; "
                   << fitted.description() << std::endl;

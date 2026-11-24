@@ -24,8 +24,7 @@ std::vector<double> radial_edges(const Config &cfg) {
 std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     const std::vector<bcg::Lens> &lenses,
     const std::vector<std::string> &files, const bcg::ShearLayout &layout, Config &cfg,
-    SelfCalibrationDiagnostics &diagnostics, const bcg::ScratchSpace &scratch,
-    std::int64_t &sources_after_cuts, MPI_Comm comm) {
+    const bcg::ScratchSpace &scratch, std::int64_t &sources_after_cuts, MPI_Comm comm) {
     int rank = 0; MPI_Comm_rank(comm, &rank);
     const auto budget = cfg.memory_bytes();
     const bool need_bar = cfg.cuts.bar_enabled();
@@ -165,7 +164,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
         if (!rank) std::cout << "Collecting raw all-R source union for Cartesian FD self-calibration" << std::endl;
         collect_fd = true;
         scan_sources();
-        cfg.calibration = selfcal->finish(comm, diagnostics);
+        cfg.calibration = selfcal->finish(comm);
         cfg.self_calibration_sources = selfcal->selected_sources();
         selfcal.reset();
         collect_fd = false;

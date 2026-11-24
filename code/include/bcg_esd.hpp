@@ -38,6 +38,7 @@ struct Config {
     int fit_profile_draws = defaults::fit_profile_draws;
     std::string fit_python_path = defaults::fit_python_path;
     std::string fit_input_path, measurement_output, legacy_measurement, fit_archive, legacy_fit_base;
+    std::string fd_points_output;
     std::string fit_plot = defaults::fit_plot, plot_title = defaults::plot_title;
     std::string posterior_plot;
     bcg::LensColumns lens_columns = defaults::lens_columns;
@@ -109,7 +110,6 @@ struct PullInput {
     FitInput fit;
     std::string esd_table;
 };
-struct SelfCalibrationDiagnostics;
 Stage parse_stage(const std::string &name);
 Config load_config(const char *ini_path, MPI_Comm comm, const char *stage_override = nullptr);
 void validate_cosmology(const CosmologyParameters &cosmology);
@@ -120,7 +120,7 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
 std::vector<double> radial_edges(const Config &cfg);
 std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     const std::vector<bcg::Lens> &lenses, const std::vector<std::string> &files,
-    const bcg::ShearLayout &layout, Config &cfg, SelfCalibrationDiagnostics &diagnostics,
+    const bcg::ShearLayout &layout, Config &cfg,
     const bcg::ScratchSpace &scratch, std::int64_t &sources_after_cuts, MPI_Comm comm);
 Result measure_bin(bcg::PairStore &pairs, double low, double high, const LensStack &stack,
                    const Config &cfg, MPI_Comm comm);
