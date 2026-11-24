@@ -5,7 +5,7 @@ PYTHON ?= python3
 MPIEXEC ?= mpiexec
 MPIEXEC_FLAGS ?=
 CXX_RUNTIME ?= auto
-PATCHELF ?= patchelf
+PATCHELF ?= auto
 
 TARGET = esd_bcg_mpi
 BUILD_DIR = build

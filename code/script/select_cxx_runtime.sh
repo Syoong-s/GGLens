@@ -40,7 +40,41 @@ if [ "$mode" = auto ]; then
 fi
 [ -f "$library" ] && [ -r "$library" ] || unavailable "No readable C++ runtime at $library."
 
-patcher=$(command -v "$patch_tool" || :)
+patchelf_in() {
+    case "$1" in
+        /*) ;;
+        *) return 1 ;;
+    esac
+    candidate="$1/bin/patchelf"
+    [ -f "$candidate" ] && [ -x "$candidate" ] || return 1
+    printf '%s\n' "$candidate"
+}
+
+find_patchelf() {
+    if [ "$patch_tool" != auto ]; then
+        command -v "$patch_tool"
+        return
+    fi
+    command -v patchelf && return
+    patchelf_in "$python_prefix" && return
+
+    # A named Conda environment may keep patchelf only in its installation's base.
+    envs_dir=${python_prefix%/}
+    envs_dir=${envs_dir%/*}
+    case "$envs_dir" in
+        */envs)
+            base=${envs_dir%/envs}
+            if [ -d "$base/conda-meta" ] && patchelf_in "$base"; then return; fi
+            ;;
+    esac
+
+    # Conda can also manage environments at prefixes outside base/envs.
+    conda_command=$(command -v "${CONDA_EXE:-conda}" || command -v conda) || return 1
+    base=$("$conda_command" info --base 2>/dev/null) || return 1
+    patchelf_in "$base"
+}
+
+patcher=$(find_patchelf || :)
 loader=$(command -v ldd || :)
 
 # Without a binary, record inputs that can change the outcome on the next build.
@@ -50,7 +84,12 @@ if [ -z "$binary" ]; then
     exit 0
 fi
 
-[ -n "$patcher" ] || unavailable "Install patchelf or set PATCHELF to use $library."
+if [ -z "$patcher" ]; then
+    if [ "$patch_tool" = auto ]; then
+        unavailable 'Could not find patchelf in PATH, the selected Python environment, or Conda base.'
+    fi
+    unavailable "Could not find the configured PATCHELF executable $patch_tool."
+fi
 [ -n "$loader" ] || unavailable 'ldd is required to check the linked dependencies.'
 [ "$("$patcher" --print-soname "$library" 2>/dev/null)" = "$soname" ] ||
     unavailable "$library does not declare $soname as its ELF SONAME."

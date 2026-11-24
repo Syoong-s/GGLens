@@ -35,10 +35,10 @@ The default measurement uses 12 radial bins from `0.1` to `100.0` comoving Mpc d
 If you need to build the program, activate the C++17, MPI, and Python environments provided for your system. The Python environment needs NumPy, SciPy 1.12 or later, Matplotlib, CAMB, and emcee. Build from the repository or extracted archive root.
 
 ```sh
-make -C code -j 4 PYTHON_CONFIG="$(command -v python3-config)"
+make -C code
 ```
 
-On Linux, the build can pin `libstdc++.so.6` from that Python environment when `patchelf` is available. This lets mixed toolchain and Conda builds select a compatible C++ runtime at startup. [C++ runtime selection](../dev/README.md#build-and-runtime)
+The build uses `mpicxx` and `python3-config` from `PATH`. On Linux, it can pin `libstdc++.so.6` from the selected Python environment. It looks for `patchelf` in `PATH`, that environment, and Conda base. [C++ runtime selection](../dev/README.md#build-and-runtime)
 
 Launch from the run directory and pass the path to your INI file. Use your allocated task count and the path to your build. On Slurm, use `$SLURM_NTASKS` for the task count.
 
