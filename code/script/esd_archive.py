@@ -98,7 +98,8 @@ class ChainArchive:
     def weights(self):
         return np.diff(self.starts, append=math.prod(self.shape))
 
-    def best(self):
+    def best_sample(self):
+        """Return the original flat index and its five parameters and log probability."""
         _, steps, walkers = self.shape
         likelihood = self.states[-1]
         candidates = np.flatnonzero(likelihood == np.max(likelihood))
@@ -106,7 +107,11 @@ class ChainArchive:
         ensemble, walker = np.divmod(track, walkers)
         flat = (ensemble * steps + step) * walkers + walker
         winner = int(np.argmin(flat))
-        return int(flat[winner]), float(likelihood[candidates[winner]])
+        return int(flat[winner]), self.states[:, candidates[winner]]
+
+    def best(self):
+        index, sample = self.best_sample()
+        return index, float(sample[-1])
 
     def expand(self):
         """Restore the original (ensemble, step, walker, parameter or log probability) array."""

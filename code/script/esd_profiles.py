@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from esd_archive import CurveArchive
+from esd_nfw import RHO_CRITICAL, halo_radius, nfw_esd, nfw_scales
 
 COMPONENTS = ("stellar", "one_halo", "two_halo", "total")
 PERCENTILES = (2.5, 16, 50, 84, 97.5)
@@ -74,10 +75,25 @@ def restore_draws(curves, observed_radii, stellar_mass):
     return radius, draws, best
 
 
-def total_profiles(curves, observed_radii, stellar_mass):
-    radius, _, _, _, total = curve_terms(curves, observed_radii, stellar_mass)
+def plot_profiles(curves, observed_radii, stellar_mass):
+    """Prepare all best-fit curves and the posterior bands for their sum."""
+    radius, stellar, one, two, total = curve_terms(curves, observed_radii, stellar_mass)
+    row = curves.best_row
+    best = np.column_stack((stellar[:, 0], one[:, row], two[:, row], total[:, row]))
     quantiles = np.percentile(total[:, curves.rows], PERCENTILES, axis=1)
-    return Profiles(radius, total[:, curves.best_row, None], quantiles[:, :, None])
+    return Profiles(radius, best, quantiles[:, :, None])
+
+
+def split_one_halo(profiles, parameters, omega_m):
+    """Split the best one-halo curve into its weighted centered and off-center terms."""
+    log_mass, concentration, f_cen = np.atleast_2d(parameters).T[:3, :, None]
+    mass = 10.0**log_mass
+    r180 = halo_radius(mass, RHO_CRITICAL * omega_m)
+    scale_radius, normalization = nfw_scales(mass, concentration, r180)
+    centered = (normalization * (f_cen * nfw_esd(profiles.radius/scale_radius)))[0]
+    stellar, one, two, total = profiles.best.T
+    best = np.column_stack((stellar, centered, one - centered, two, total))
+    return Profiles(profiles.radius, best, profiles.quantiles)
 
 
 def read_profiles(path, fit_id=None):

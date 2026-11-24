@@ -113,9 +113,9 @@ FitBackend::FitBackend(const Config &cfg) : runtime_(std::make_unique<Runtime>()
         if (PyList_Insert(PySys_GetObject("path"), 0, path.get()) != 0) checked(nullptr);
     }
     load_module("esd_archive", esd_archive_source);
+    load_module("esd_nfw", esd_nfw_source);
     load_module("esd_profiles", esd_profiles_source);
     if (cfg.stage != Stage::pull) {
-        load_module("esd_nfw", esd_nfw_source);
         load_module("esd_two_halo", esd_two_halo_source);
         runtime_->module = load_module("esd_fit", esd_fit_source);
     }
@@ -210,8 +210,9 @@ void FitBackend::pull(const Config &cfg) {
     const auto export_posterior = checked(PyUnicode_DecodeFSDefault(cfg.posterior_plot.c_str()));
     const auto paths = checked(Py_BuildValue("{s:O,s:O,s:O}", "table", export_table.get(),
                                            "esd", export_esd.get(), "posterior", export_posterior.get()));
-    const auto context = checked(Py_BuildValue("{s:s,s:s,s:d}", "title", cfg.plot_title.c_str(),
-        "center", bcg::center_name(input.metadata.center), "stellar_mass", input.metadata.sample.stellar_mass));
+    const auto context = checked(Py_BuildValue("{s:s,s:s,s:d,s:d}", "title", cfg.plot_title.c_str(),
+        "center", bcg::center_name(input.metadata.center), "stellar_mass", input.metadata.sample.stellar_mass,
+        "omega_m", input.metadata.cosmology.omega_m));
     checked(PyObject_CallMethod(plot.get(), "publish_saved_fit", "OOOOOOO", PyTuple_GetItem(opened.get(), 0),
                                paths.get(), radius.get(), measured.get(), covariance.get(), context.get(), table.get()));
 }

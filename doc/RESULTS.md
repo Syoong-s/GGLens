@@ -7,7 +7,7 @@ With `[run] output-dir = results` and `output = ESD_results.dat`, a successful `
 | `measurement/ESD_results_measurement.bin` | All measured bins, both sets of jackknife replicas, lens-stack and calibration statistics, and cosmology |
 | `fit/ESD_results/ESD_results_chain.bin` | All retained five-parameter samples and log probabilities in their original ensemble, step, and walker order, plus sampling diagnostics and the measurement reference |
 | `fit/ESD_results/ESD_results_profile_draws.bin` | Joint ESD curve predictions at the selected chain positions and at the global best fit |
-| `ESD_results_fit.png` | Tangential ESD used in the fit, total best-fit curve, and 68% and 95% posterior bands |
+| `ESD_results_fit.png` | Tangential ESD used in the fit, best-fit stellar, centered one-halo, off-center one-halo, two-halo and total curves, and the total's 68% and 95% posterior bands |
 | `ESD_results.dat` | All measured radial bins and measurement statistics |
 | `ESD_results_posterior.png` | Five marginal posteriors with the 16th, 50th and 84th percentiles, and pairwise joint distributions |
 

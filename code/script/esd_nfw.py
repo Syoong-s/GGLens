@@ -1,9 +1,20 @@
 """Centered and Rayleigh-miscentered NFW profiles in dimensionless radii."""
 
 import numpy as np
-from scipy.integrate import cumulative_simpson
-from scipy.interpolate import RectBivariateSpline
-from scipy.special import i0e, roots_legendre
+
+RHO_CRITICAL = 2.77536627e11  # In (M_sun/h) / (Mpc/h)^3.
+
+
+def halo_radius(mass, mean_density):
+    """Return comoving r180m in Mpc/h for a mass in M_sun/h."""
+    return np.cbrt(3*mass/(4*np.pi*180*mean_density))
+
+
+def nfw_scales(mass, concentration, r180):
+    scale_radius = r180/concentration
+    normalization = mass / (2*np.pi*scale_radius**2*(np.log1p(concentration) -
+                            concentration/(1+concentration))*1e12)
+    return scale_radius, normalization
 
 
 # ==========================================
@@ -47,6 +58,8 @@ def nfw_esd(x):
 # Method: Integrate the NFW surface density convolved with a 2D isotropic Gaussian.
 # ==========================================
 def offset_surface(x, sigma, nodes, weights):
+    from scipy.special import i0e
+
     lo = np.maximum(-x/sigma, -9.0)
     half = (9.0 - lo) / 2.0
     t = lo[:, None] + half[:, None] * (nodes + 1)
@@ -66,6 +79,10 @@ class OffsetNfw:
     # Method: Integrate a log grid after subtracting the constant central surface density.
     # ==========================================
     def __init__(self, min_x, max_x, max_sigma):
+        from scipy.integrate import cumulative_simpson
+        from scipy.interpolate import RectBivariateSpline
+        from scipy.special import roots_legendre
+
         self.min_sigma = min(0.005, min_x/20)
         log_sigma = np.linspace(np.log(self.min_sigma), np.log(max_sigma), 128)
         log_x = np.linspace(np.log(min_x/256), np.log(max_x*1.01), 640)

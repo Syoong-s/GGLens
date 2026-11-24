@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "script"))
 
 from esd_archive import CurveArchive, load_fit, save_fit
 from esd_plot import posterior_percentiles
-from esd_profiles import restore_draws, stellar_profile, total_profiles
+from esd_profiles import plot_profiles, restore_draws, split_one_halo, stellar_profile
 
 
 COSMOLOGY = """\
@@ -168,6 +168,9 @@ def check_lossless_codec(root):
     np.testing.assert_array_equal(saved.expand().view(np.uint64), chain.view(np.uint64))
     np.testing.assert_array_equal(saved.diagnostics, diagnostics)
     assert saved.best() == (7, 999.0)
+    index, parameters = saved.best_sample()
+    assert index == 7
+    np.testing.assert_array_equal(parameters, chain.reshape(-1, 6)[index])
     for i in range(5):
         np.testing.assert_array_equal(posterior_percentiles(saved.states[i], saved.weights),
                                       np.percentile(chain[..., i], [16, 50, 84]))
@@ -175,10 +178,19 @@ def check_lossless_codec(root):
     np.testing.assert_array_equal(complete[0], complete[1])
     np.testing.assert_array_equal(complete[:, :, 0], np.broadcast_to(stellar_profile(radius, 4.), (3, 2)))
     np.testing.assert_array_equal(complete[:, :, 3], (complete[:, :, 0] + complete[:, :, 1]) + complete[:, :, 2])
-    profiles = total_profiles(curves, radius, 4.)
-    np.testing.assert_array_equal(profiles.best[:, 0], best[:, 3])
+    profiles = plot_profiles(curves, radius, 4.)
+    np.testing.assert_array_equal(profiles.best, best)
     np.testing.assert_array_equal(profiles.quantiles[:, :, 0],
                                   np.percentile(complete[:, :, 3], [2.5, 16, 50, 84, 97.5], axis=0))
+    parameters = [13.6, 6.5, 0.5, 0.18, 2.0]
+    split = split_one_halo(profiles, parameters, 0.28)
+    np.testing.assert_array_equal(split.best[:, [0, 3, 4]], best[:, [0, 2, 3]])
+    np.testing.assert_allclose(split.best[:, 1] + split.best[:, 2], best[:, 1])
+    np.testing.assert_array_equal(split.quantiles, profiles.quantiles)
+    parameters[2] = 0.0
+    split = split_one_halo(profiles, parameters, 0.28)
+    np.testing.assert_array_equal(split.best[:, 1], np.zeros_like(radius))
+    np.testing.assert_array_equal(split.best[:, 2], best[:, 1])
     previous = archive.resolve()
     save_fit(archive, chain, diagnostics, draws, context)
     assert not previous.exists()
@@ -278,6 +290,8 @@ def main():
         check_fit(combined, legacy, same_measurement=False)
         stored, _ = load_fit(legacy / "fit" / "sample")
         np.testing.assert_array_equal(stored.legacy_cosmology, fields[:6])
+        run("legacy-file-pull", "[run]\nstage = pull\noutput = legacy/sample.dat\n" + FIT_SETTINGS)
+        assert (legacy / "sample_fit.png").read_bytes() == (combined / "sample_fit.png").read_bytes()
         run("legacy-snapshot", "[run]\nstage = fit\noutput = legacy/sample.dat\n" + FIT_SETTINGS)
         check_fit(combined, legacy, same_measurement=False)
         run("legacy-pull", "[run]\nstage = pull\noutput = legacy/sample.dat\n" + FIT_SETTINGS)

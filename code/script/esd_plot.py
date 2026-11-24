@@ -95,7 +95,7 @@ def save_figure(fig, output, dpi):
 
 # ==========================================
 # Function: render_fit
-# Method: Draw the saved total best-fit curve and posterior bands against the measured ESD.
+# Method: Draw the best-fit components and total posterior bands against the measured ESD.
 # ==========================================
 def render_fit(radius, measured, covariance, profiles, chi2, dof, path, title):
     import matplotlib
@@ -106,16 +106,24 @@ def render_fit(radius, measured, covariance, profiles, chi2, dof, path, title):
     best = profiles.best[:, -1]
     p025, p16, _, p84, p975 = profiles.quantiles[:, :, -1]
     fig, ax = plt.subplots(figsize=(7.4, 5.1))
+    ax.axhline(0, color="0.62", linewidth=0.8, zorder=0)
     ax.fill_between(r, p025, p975, color="#c9ddf1", label="95% posterior")
     ax.fill_between(r, p16, p84, color="#83b0dc", label="68% posterior")
-    ax.plot(r, best, color="#123b65", linewidth=2, label="Best-fit model")
+    ax.plot(r, best, color="#123b65", linewidth=2, label="Total best fit")
+    component_styles = (
+        ("Stellar", "#b6542b", ":"),
+        ("Centered one-halo", "#247a69", "--"),
+        ("Off-center one-halo", "#b14f61", (0, (5, 2, 1, 2, 1, 2))),
+        ("Two-halo", "#80478a", "-."),
+    )
+    for values, (label, color, linestyle) in zip(profiles.best.T[:-1], component_styles):
+        ax.plot(r, values, label=label, color=color, linestyle=linestyle, linewidth=1.4)
     ax.errorbar(radius, measured, yerr=np.sqrt(np.diag(covariance)),
                 color="#252525", fmt="o", ms=4, capsize=2, zorder=3, label="Tangential ESD")
-    ax.axhline(0, color="0.62", linewidth=0.8)
     ax.set(xscale="log", yscale="symlog", xlabel=r"$R\ [h^{-1}\,\mathrm{Mpc}]$",
            ylabel=r"$\Delta\Sigma\ [h\,M_\odot/\mathrm{pc}^2]$", title=title)
     ax.text(0.03, 0.06, rf"$\chi^2/\nu={chi2:.2f}/{dof}$", transform=ax.transAxes)
-    ax.legend(frameon=False)
+    ax.legend(frameon=False, ncol=2, fontsize=9)
     save_figure(fig, path, 220)
 
 
@@ -169,7 +177,8 @@ def render_posterior(samples, weights, path):
 
 
 def read_legacy_fit(prefix, posterior=False):
-    from esd_profiles import read_profiles
+    from esd_archive import PARAMETERS
+    from esd_profiles import read_profiles, split_one_halo
 
     summary = json.loads(Path(f"{prefix}_fit.json").read_text())
     fit_id = summary["fit_id"]
@@ -186,6 +195,8 @@ def read_legacy_fit(prefix, posterior=False):
         if (np.any(keep >= len(profiles.radius)) or not np.array_equal(profiles.radius[keep], obs)
                 or not np.array_equal(profiles.best[keep, -1], summary["fitted_profile"]["total"])):
             raise ValueError("Fit summary and plotted best-fit values disagree")
+        best = [summary["parameters"][name]["best"] for name in PARAMETERS]
+        profiles = split_one_halo(profiles, best, summary["cosmology"]["omega_m"])
         samples = chain["posterior"].reshape(-1, 5).T if posterior else None
         return summary, profiles, (obs, chain["measured"], chain["covariance"]), samples
 
@@ -210,7 +221,7 @@ def open_saved_fit(archive, legacy_base):
 
 def publish_saved_fit(saved, paths, radii, measured, covariance, context, table):
     from esd_archive import lock_directory
-    from esd_profiles import total_profiles
+    from esd_profiles import plot_profiles, split_one_halo
 
     radii = np.asarray(radii)
     measured = np.asarray(measured)
@@ -218,9 +229,11 @@ def publish_saved_fit(saved, paths, radii, measured, covariance, context, table)
     title = context["title"]
     if len(saved) == 2:
         chain, draws = saved
-        _, log_probability = chain.best()
-        chi2, dof = -2 * log_probability, len(radii) - 5
-        profiles = total_profiles(draws, radii, context["stellar_mass"])
+        _, best = chain.best_sample()
+        chi2, dof = -2 * best[-1], len(radii) - 5
+        profiles = plot_profiles(draws, radii, context["stellar_mass"])
+        omega_m = chain.legacy_cosmology[0] if chain.legacy_cosmology.size else context["omega_m"]
+        profiles = split_one_halo(profiles, best, omega_m)
         samples, weights = chain.states[:5], chain.weights
         title = title or chain.title or f'{context["center"].upper()}-centered group lensing'
     else:

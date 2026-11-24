@@ -4,7 +4,7 @@ import emcee
 import numpy as np
 from scipy.linalg import solve_triangular
 
-from esd_nfw import OffsetNfw, nfw_esd
+from esd_nfw import OffsetNfw, RHO_CRITICAL, halo_radius, nfw_esd, nfw_scales
 from esd_two_halo import TwoHalo, nonlinear_correlation
 from esd_archive import PARAMETERS, save_fit
 from esd_profiles import evaluate_profile_draws, stellar_profile
@@ -24,7 +24,7 @@ class HaloModel:
     # ==========================================
     def __init__(self, radius, stellar_mass, omega_m, correlation):
         self.stellar_mass = stellar_mass
-        self.mean_density = 2.77536627e11 * omega_m
+        self.mean_density = RHO_CRITICAL * omega_m
         min_x = np.min(radius) * LOWER[1]/self.halo_radius(10**UPPER[0])
         max_x = np.max(radius) * UPPER[1]/self.halo_radius(10**LOWER[0])
         self.offset = OffsetNfw(min_x, max_x, UPPER[1]*UPPER[3])
@@ -35,7 +35,7 @@ class HaloModel:
     # Method: Return comoving r180m in Mpc/h for a mass in M_sun/h.
     # ==========================================
     def halo_radius(self, mass):
-        return np.cbrt(3*mass/(4*np.pi*180*self.mean_density))
+        return halo_radius(mass, self.mean_density)
 
     # ==========================================
     # Function: components
@@ -45,8 +45,7 @@ class HaloModel:
         log_mass, c, f_cen, eta, bias = np.atleast_2d(theta).T[:, :, None]
         mass = 10.0**log_mass
         r180 = self.halo_radius(mass)
-        rs = r180/c
-        normalization = mass / (2*np.pi*rs**2*(np.log1p(c) - c/(1+c))*1e12)
+        rs, normalization = nfw_scales(mass, c, r180)
         x = r/rs
         centered = nfw_esd(x)
         off = self.offset.evaluate(x, eta*c, centered)
