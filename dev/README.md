@@ -36,14 +36,18 @@ The Makefile in `code/` compiles C++17 with `mpicxx`. It uses `PYTHON_CONFIG --i
 
 The fit bridge initializes isolated CPython only on ranks assigned an ensemble. It disables Python bytecode writes and signal-handler installation. The bridge adds `[fit] python-path` to the embedded search path when set. Use that setting for dependencies outside the linked environment.
 
-The cluster smoke tests built with GCC 12.3.0 and Open MPI 4.1.6. The runtime was Python 3.12.13, NumPy 2.4.3, SciPy 1.17.1, Matplotlib 3.10.9, CAMB 1.6.5, and emcee 3.1.6. `cumulative_simpson` requires SciPy 1.12 or later. In the tested mixed compiler and Conda environment, workers preloaded the Conda C++ runtime to satisfy the SciPy extensions' ABI.
+The embedded Python interpreter and its compiled extensions share the process's C++ runtime. On Linux, the default `CXX_RUNTIME=auto` looks for `libstdc++.so.6` under `lib/` or `lib64/` of the prefix returned by `PYTHON_CONFIG --exec-prefix`. When `patchelf` and `ldd` are available, the build tries an absolute dependency on that one library in a temporary copy of the executable. It publishes the patched copy after checking the linked dependencies and verifying that MPI and `libpython` resolve to the same paths. If automatic selection is unavailable or the loader rejects the candidate, the build reports the reason and publishes the original link result.
+
+Use `CXX_RUNTIME=system` to use normal linker resolution or set `CXX_RUNTIME` to an absolute `libstdc++.so.6` path to require a particular runtime. Set `PATCHELF` to the path of the tool if it is outside `PATH`. A build with a pinned runtime uses the selected library path at startup. Rebuild after moving the Python environment to another location. Use `test-stages` to check imports, including dependencies loaded only during fitting.
+
+The cluster smoke tests built with GCC 12.3.0 and Open MPI 4.1.6. The runtime was Python 3.12.13, NumPy 2.4.3, SciPy 1.17.1, Matplotlib 3.10.9, CAMB 1.6.5, and emcee 3.1.6. `cumulative_simpson` requires SciPy 1.12 or later.
 
 ```sh
 make -C code -j 4 PYTHON_CONFIG="$(command -v python3-config)" CPPFLAGS=-DOMPI_SKIP_MPICXX
-mpirun -np "$SLURM_NTASKS" -x LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6" ./code/esd_bcg_mpi "/path/to/esd.ini"
+mpirun -np "$SLURM_NTASKS" ./code/esd_bcg_mpi "/path/to/esd.ini"
 ```
 
-Apply the preload to a mixed environment that needs it. Choose `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `MKL_NUM_THREADS=1` for MPI tasks allocated one CPU each.
+For builds using normal linker resolution, a mixed environment that reports `CXXABI_*` or `GLIBCXX_*` version errors can pass its compatible runtime to MPI ranks with `-x LD_PRELOAD="$CONDA_PREFIX/lib/libstdc++.so.6"`. Choose `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, and `MKL_NUM_THREADS=1` for MPI tasks allocated one CPU each.
 
 ## Validation cases
 

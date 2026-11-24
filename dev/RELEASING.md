@@ -8,7 +8,7 @@ After committing the release changes, list the files Git will export from that c
 git archive --format=tar.gz --prefix=FQ_GGLens/ HEAD | tar -tzf -
 ```
 
-The archive contains `LICENSE`, `code/Makefile`, the headers in `code/include/`, the C++ sources in `code/src/`, and the five Python modules listed in `FIT_MODULES`. Build from the extracted archive root with `make -C code`. Update the allowlist when a new build input falls outside its current rules. Use the tagged repository to access the documentation and configuration examples. [Archive allowlist](../.gitattributes)
+The archive contains `LICENSE`, `code/Makefile`, the headers in `code/include/`, the C++ sources in `code/src/`, the five Python modules listed in `FIT_MODULES`, and the C++ runtime selection script. Build from the extracted archive root with `make -C code`. Update the allowlist when a new build input falls outside its current rules. Use the tagged repository to access the documentation and configuration examples. [Archive allowlist](../.gitattributes)
 
 ## Publish a version
 
