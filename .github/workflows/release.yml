@@ -30,6 +30,39 @@ jobs:
           git archive --format=tar.gz --prefix="${package}/" --output="$archive" HEAD
           printf 'archive=%s\n' "$archive" >> "$GITHUB_OUTPUT"
 
+      - name: Install archive build dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential libopenmpi-dev openmpi-bin python3-dev
+
+      - name: Verify source archive
+        shell: bash
+        env:
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          PYTHON_CONFIG: /usr/bin/python3-config
+        run: |
+          verification=$(mktemp -d "${RUNNER_TEMP}/fq-gglens-verify.XXXXXX")
+          tar -xzf "$ARCHIVE" -C "$verification"
+          package="${ARCHIVE##*/}"
+          code_dir="$verification/${package%.tar.gz}/code"
+          for path in "$code_dir/GNUmakefile" "$code_dir/tests"; do
+            if [[ -e "$path" || -L "$path" ]]; then
+              printf 'Unexpected development file in source archive: %s\n' "$path" >&2
+              exit 1
+            fi
+          done
+          test -f "$code_dir/Makefile"
+          if grep -Eq 'tests/|test-(catalogs|stages)|test_catalogs|GNUmakefile' "$code_dir/Makefile"; then
+            printf 'Unexpected development rule in source archive Makefile\n' >&2
+            exit 1
+          fi
+          make -C "$code_dir" -j 2
+          test -x "$code_dir/esd_bcg_mpi"
+          make -C "$code_dir" clean
+          test ! -e "$code_dir/build"
+          test ! -e "$code_dir/esd_bcg_mpi"
+
       - name: Publish release
         shell: bash
         env:

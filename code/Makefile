@@ -1,9 +1,6 @@
 CXX = mpicxx
 CXXFLAGS ?= -O3 -std=c++17 -Wall -Wextra -Wpedantic
 PYTHON_CONFIG ?= python3-config
-PYTHON ?= python3
-MPIEXEC ?= mpiexec
-MPIEXEC_FLAGS ?=
 CXX_RUNTIME ?= auto
 PATCHELF ?= auto
 
@@ -15,8 +12,6 @@ FIT_MODULES = esd_nfw esd_two_halo esd_archive esd_profiles esd_plot esd_fit
 FIT_SOURCES = $(addprefix $(BUILD_DIR)/,$(addsuffix _source.inc,$(FIT_MODULES)))
 SOURCES = $(filter-out src/esd_fit_backend.cpp,$(wildcard src/*.cpp))
 OBJECTS = $(patsubst src/%.cpp,$(BUILD_DIR)/%.o,$(SOURCES))
-CATALOG_TEST = $(BUILD_DIR)/test_catalogs
-CATALOG_OBJECTS = $(filter $(BUILD_DIR)/bcg_dr9% $(BUILD_DIR)/esd_config.o $(BUILD_DIR)/esd_lenses.o,$(OBJECTS))
 PYTHON_BUILD_SETTINGS = $(BUILD_DIR)/python-build.conf
 CXX_RUNTIME_SCRIPT = script/select_cxx_runtime.sh
 
@@ -63,21 +58,12 @@ $(BUILD_DIR)/%.o: src/%.cpp Makefile | $(BUILD_DIR)
 $(BUILD_DIR):
 	mkdir -p $@
 
-$(CATALOG_TEST): tests/catalogs.cpp $(CATALOG_OBJECTS) Makefile
-	$(CXX) $(CPPFLAGS) $(CXXFLAGS) $(LDFLAGS) -Iinclude -o $@ $< $(CATALOG_OBJECTS) $(LDLIBS)
-
-test-catalogs: $(CATALOG_TEST)
-	$(PYTHON) tests/catalogs.py $(CATALOG_TEST) $(MPIEXEC) $(MPIEXEC_FLAGS)
-
-test-stages: $(TARGET)
-	$(PYTHON) tests/stages.py $(TARGET) $(MPIEXEC) $(MPIEXEC_FLAGS)
-
 clean:
-	rm -f $(TARGET) $(CATALOG_TEST) $(OBJECTS) $(FIT_LIB) $(FIT_OBJECT) $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d) $(FIT_SOURCES) $(addsuffix .tmp,$(FIT_SOURCES)) $(PYTHON_BUILD_SETTINGS)
+	rm -f $(TARGET) $(OBJECTS) $(FIT_LIB) $(FIT_OBJECT) $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d) $(FIT_SOURCES) $(addsuffix .tmp,$(FIT_SOURCES)) $(PYTHON_BUILD_SETTINGS)
 	@rmdir $(BUILD_DIR) 2>/dev/null || true
 
 -include $(OBJECTS:.o=.d) $(FIT_OBJECT:.o=.d)
 
 FORCE:
 
-.PHONY: all clean test-catalogs test-stages FORCE
+.PHONY: all clean FORCE
