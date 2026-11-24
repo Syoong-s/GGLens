@@ -2,6 +2,8 @@
 #include "bcg_esd.hpp"
 
 namespace bcg_esd {
+inline constexpr char fd_points_header[] = "# component bin gf_low gf_high gf_mean shear sigma n_sources status";
+
 // ==========================================
 // Structure: FdCalibrationPoint
 // Method: Retain one global Cartesian FD-bin estimate and its fit validity.

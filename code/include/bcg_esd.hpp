@@ -106,9 +106,16 @@ struct Measurement {
     bool fd_restored = false;
     std::uint64_t id = 0;
 };
+struct FdPlot {
+    std::string output;
+    std::array<std::vector<double>, 2> points; // Mean FD, measured shear, and sigma for each valid bin.
+    bcg::ShearCalibration calibration;
+    double limit = 0;
+};
 struct PullInput {
     FitInput fit;
     std::string esd_table;
+    FdPlot fd;
 };
 Stage parse_stage(const std::string &name);
 Config load_config(const char *ini_path, MPI_Comm comm, const char *stage_override = nullptr);

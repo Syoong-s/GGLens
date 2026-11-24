@@ -103,7 +103,8 @@ def load_measurement(path):
 
 def check_fd_points(root, run):
     inputs = root / "inputs"
-    lens_ras = np.loadtxt(inputs / "galaxies.dat", usecols=1)[:2]
+    lens_ras = np.loadtxt(inputs / "galaxies.dat", usecols=1)
+    radial_bins = (0, 1, 3, 4, 5, 6)
     counts = np.array([2400, 0, 2400, 4, 2400])
     edges = np.linspace(-0.0015, 0.0015, len(counts) + 1)
     centers = (edges[:-1] + edges[1:]) / 2
@@ -120,7 +121,10 @@ def check_fd_points(root, run):
             for bin_index, (field, count) in enumerate(zip(centers, counts)):
                 noise = rng.normal(0, 0.025, (count // 2, 2))
                 for row, (noise1, noise2) in enumerate(np.concatenate((noise, -noise))):
-                    ra = lens_ras[row % 2] + 0.14 + 0.01 * bin_index + 2e-7 * row
+                    radial_bin = radial_bins[(row // len(lens_ras)) % len(radial_bins)]
+                    radius = 0.2 * 2**(radial_bin + 0.5)
+                    offset = 0.91 + 0.015 * bin_index + 1e-5 * row
+                    ra = lens_ras[row % len(lens_ras)] + np.rad2deg(offset * radius / 1000)
                     g1 = 1.1 * field + 0.0001 + noise1
                     g2 = -gain2 * field - 0.0002 + noise2
                     stream.write(f"{ra:.17g} 0 0.9 {g1:.17g} {g2:.17g} 1 0 0 {field:.17g} {-field:.17g}\n")
@@ -137,6 +141,33 @@ def check_fd_points(root, run):
         assert np.all(np.isfinite(points["shear"][valid])) and np.all(points["sigma"][valid] > 0)
         assert np.all(np.isnan(points["shear"][~valid])) and np.all(np.isnan(points["sigma"][~valid]))
         assert snapshot.is_file() == (error is None)
+
+
+def check_fd_pull(root, run):
+    source = measurement_path(root / "fd-valid")
+    points = source.with_name("sample_fd_points.dat")
+    original_points = points.read_bytes()
+    settings = ("[run]\noutput-dir = fd refit\noutput = refitted.dat\n"
+                "[calibration]\nself-calibrate = false\n" + FIT_SETTINGS)
+    run("fd-fit", settings + f"input = {source}\n", "--stage", "fit")
+    output = root / "fd refit" / "refitted_fd.png"
+    assert not output.exists()
+    run("fd-pull", settings, "--stage", "pull")
+    assert output.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    assert points.read_bytes() == original_points
+    output.unlink()
+
+    rejected = root / "fd-rejected" / "measurement" / points.name
+    points.write_bytes(rejected.read_bytes())
+    run("fd-pull-mismatched", settings, "--stage", "pull")
+    assert not output.exists()
+    points.unlink()
+    log = run("fd-pull-missing", settings, "--stage", "pull")
+    assert "missing point table" in log
+    assert {p.name for p in output.parent.iterdir() if p.is_file()} == {
+        "refitted.dat", "refitted_fit.png", "refitted_posterior.png"
+    }
+    points.write_bytes(original_points)
 
 
 def check_fit(reference, other, same_measurement=True):
@@ -301,6 +332,7 @@ def main():
         small_snapshot = measurement_path(root / "small", "ESD_results")
         assert small_snapshot.is_file()
         (root / "inputs").rename(root / "offline inputs")
+        check_fd_pull(root, run)
 
         refit = root / "refit"
         refit_run = "[run]\nstage = measure\noutput-dir = refit\noutput = sample.dat\n"
@@ -348,7 +380,7 @@ def main():
         run("bad-legacy", "[run]\nstage = fit\noutput-dir = bad\n" + FIT_SETTINGS + f"input = {bad_legacy}\n",
             error="Unsupported ESD fit input version")
 
-    print("FD points, combined and split stages, lossless archive, and legacy ESD checks passed")
+    print("FD points and plots, combined and split stages, lossless archive, and legacy ESD checks passed")
 
 
 if __name__ == "__main__":

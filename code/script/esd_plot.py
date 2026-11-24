@@ -127,6 +127,32 @@ def render_fit(radius, measured, covariance, profiles, chi2, dof, path, title):
     save_figure(fig, path, 220)
 
 
+def render_fd_test(path, points, calibration, limit):
+    import matplotlib
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    fig, axes = plt.subplots(1, 2, figsize=(8.6, 4.0))
+    fig.suptitle("Field-distortion self-calibration")
+    field = np.array([-limit, limit])
+    for component, (ax, rows, (m, c)) in enumerate(zip(axes, points, calibration), 1):
+        gf, shear, sigma = np.asarray(rows).reshape(-1, 3).T
+        ax.plot(field, field, color="0.55", linestyle="--", linewidth=1.1, label=r"$\hat g = g_f$")
+        ax.plot(field, (1 + m)*field + c, color="#247a69", linewidth=1.5,
+                label=rf"Fit  $m={m:.3g}$, $c={c:.3g}$")
+        ax.errorbar(gf, shear, yerr=sigma, fmt="o", color="#123b65", ms=3.5, capsize=2,
+                    zorder=3, label="FD bins")
+        ax.set(xlabel=rf"Field distortion $g_{{f,{component}}}$", title=rf"Component $g_{component}$")
+        ax.ticklabel_format(style="sci", scilimits=(-2, 2), useMathText=True)
+        ax.legend(frameon=False, fontsize=8)
+    axes[0].set_ylabel(r"Measured shear $\hat g$")
+    lower = min(ax.get_ylim()[0] for ax in axes)
+    upper = max(ax.get_ylim()[1] for ax in axes)
+    for ax in axes:
+        ax.set_ylim(lower, upper)
+    save_figure(fig, path, 220)
+
+
 def posterior_percentiles(samples, weights):
     order = np.argsort(samples)
     cumulative = np.cumsum(weights[order], dtype=np.int64)
@@ -257,6 +283,8 @@ def publish_saved_fit(saved, paths, radii, measured, covariance, context, table)
         staged["table"].write_bytes(table)
         render_fit(radii, measured, covariance, profiles, chi2, dof, staged["esd"], title)
         render_posterior(samples, weights, staged["posterior"])
+        if "fd" in staged:
+            render_fd_test(staged["fd"], **context["fd"])
         with lock_directory(destinations["table"].parent, fcntl.LOCK_EX):
             for name, path in destinations.items():
                 os.replace(staged[name], path)

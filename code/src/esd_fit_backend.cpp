@@ -213,6 +213,17 @@ void FitBackend::pull(const Config &cfg) {
     const auto context = checked(Py_BuildValue("{s:s,s:s,s:d,s:d}", "title", cfg.plot_title.c_str(),
         "center", bcg::center_name(input.metadata.center), "stellar_mass", input.metadata.sample.stellar_mass,
         "omega_m", input.metadata.cosmology.omega_m));
+    const auto &fd = data.fd;
+    if (!fd.output.empty()) {
+        const auto first = as_list(fd.points[0]), second = as_list(fd.points[1]);
+        const auto output = checked(PyUnicode_DecodeFSDefault(fd.output.c_str()));
+        const auto &cal = fd.calibration;
+        const auto settings = checked(Py_BuildValue("{s:(OO),s:((dd)(dd)),s:d}",
+            "points", first.get(), second.get(), "calibration", cal.m1, cal.c1, cal.m2, cal.c2, "limit", fd.limit));
+        if (PyDict_SetItemString(paths.get(), "fd", output.get()) != 0 ||
+            PyDict_SetItemString(context.get(), "fd", settings.get()) != 0)
+            checked(nullptr);
+    }
     checked(PyObject_CallMethod(plot.get(), "publish_saved_fit", "OOOOOOO", PyTuple_GetItem(opened.get(), 0),
                                paths.get(), radius.get(), measured.get(), covariance.get(), context.get(), table.get()));
 }

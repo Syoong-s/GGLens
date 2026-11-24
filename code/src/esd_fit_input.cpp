@@ -1,5 +1,6 @@
 #include "bcg_esd.hpp"
 #include "bcg_archive.hpp"
+#include "selfcalibration.hpp"
 #include <iostream>
 
 namespace bcg_esd {
@@ -86,10 +87,10 @@ std::istringstream legacy_header(std::string line) {
     return std::istringstream(line.substr(2));
 }
 
-// Legacy tables use nan for empty bins. Formatted double extraction does not read it.
+// Saved tables use nan for unavailable values. Formatted double extraction does not read it.
 double table_number(std::istream &in) {
     std::string token;
-    if (!(in >> token)) throw std::runtime_error("Incomplete measurement or covariance row");
+    if (!(in >> token)) throw std::runtime_error("Incomplete table row");
     char *end = nullptr;
     const double value = std::strtod(token.c_str(), &end);
     if (end != token.c_str() + token.size()) throw std::runtime_error("Invalid table value: " + token);
@@ -304,6 +305,91 @@ void protect_measurement_file(const path &source, const Config &cfg, bool export
             throw std::runtime_error("Pull output overlaps a measurement input: " + destination);
     }
 }
+
+std::array<std::vector<FdCalibrationPoint>, 2> read_fd_points(std::istream &in, const Measurement &measurement) {
+    std::string line;
+    if (!std::getline(in, line) || bcg::trim(line) != fd_points_header)
+        throw std::runtime_error("Invalid FD point table header");
+    const auto source_count = "# all_R_sources=" + std::to_string(measurement.calibration_sources);
+    bool matched_count = false;
+    std::array<std::vector<FdCalibrationPoint>, 2> components;
+    while (std::getline(in, line)) {
+        line = bcg::trim(line);
+        if (line.empty()) continue;
+        if (line.front() == '#') {
+            matched_count |= line == source_count;
+            continue;
+        }
+        std::istringstream row(line);
+        int component = 0, bin = 0;
+        if (!(row >> component >> bin) || component < 1 || component > 2 || bin < 1 || bin > measurement.fd_bins)
+            throw std::runtime_error("Invalid FD component or bin number");
+        auto &points = components[component - 1];
+        const double low = table_number(row), high = table_number(row);
+        FdCalibrationPoint point;
+        point.field = table_number(row);
+        point.value = table_number(row);
+        point.sigma = table_number(row);
+        if (!(row >> point.count >> point.status) || point.count < 0 || point.count > measurement.calibration_sources ||
+            point.status < 0 || point.status > 2 || static_cast<std::size_t>(bin) != points.size() + 1 ||
+            !(low >= -measurement.fd_limit && high <= measurement.fd_limit && low < high))
+            throw std::runtime_error("Invalid FD point row");
+        if (point.status == 0 && !(point.count > 0 && std::isfinite(point.field) &&
+                std::isfinite(point.value) && std::isfinite(point.sigma) && point.sigma > 0))
+            throw std::runtime_error("Invalid FD shear estimate or uncertainty");
+        expect_end(row);
+        points.push_back(point);
+    }
+    const auto count = static_cast<std::size_t>(measurement.fd_bins);
+    if (!in.eof() || in.bad() || !matched_count || components[0].size() != count || components[1].size() != count)
+        throw std::runtime_error("FD point table does not match the measurement source or bin counts");
+    return components;
+}
+
+FdPlot load_fd_plot(const path &snapshot, const Measurement &measurement, const Config &cfg) {
+    if (!measurement.fd_bins) return {};
+    const std::string suffix = "_measurement";
+    auto prefix = snapshot.stem().string();
+    if (prefix.size() > suffix.size() && prefix.compare(prefix.size() - suffix.size(), suffix.size(), suffix) == 0)
+        prefix.resize(prefix.size() - suffix.size());
+    const auto source = snapshot.parent_path() / (prefix + "_fd_points.dat");
+    if (!bcg::fs::is_regular_file(source)) {
+        std::cout << "FD plot unavailable: missing point table " << source.string() << std::endl;
+        return {};
+    }
+    protect_measurement_file(source, cfg);
+
+    FdPlot result;
+    result.calibration = measurement.calibration;
+    result.limit = measurement.fd_limit;
+    const auto &cal = result.calibration;
+    try {
+        auto in = open_input(source);
+        const auto points = read_fd_points(in, measurement);
+        const std::array<double, 2> m{cal.m1, cal.m2}, c{cal.c1, cal.c2};
+        for (std::size_t i = 0; i < points.size(); ++i) {
+            // Check the companion table against the calibration used for this measurement.
+            const auto fit = fit_selfcal_line(points[i]);
+            if (std::abs(fit.m - m[i]) > 1e-10 * std::max(1.0, std::abs(m[i])) ||
+                std::abs(fit.c - c[i]) > 1e-10 * std::max(result.limit, std::abs(c[i])))
+                throw std::runtime_error("FD points do not reproduce the saved calibration");
+            for (const auto &p : points[i])
+                if (p.status == 0) result.points[i].insert(result.points[i].end(), {p.field, p.value, p.sigma});
+        }
+    } catch (const std::runtime_error &error) {
+        std::cerr << "FD plot unavailable for " << source.string() << ": " << error.what() << std::endl;
+        return {};
+    }
+
+    result.output = cfg.legacy_fit_base + "_fd.png";
+    const auto destination = bcg::fs::weakly_canonical(bcg::fs::absolute(result.output));
+    for (const auto &reserved : {cfg.output, cfg.fit_plot, cfg.posterior_plot, cfg.fit_archive,
+                                 cfg.measurement_output, snapshot.string(), source.string()}) {
+        if (bcg::fs::weakly_canonical(bcg::fs::absolute(reserved)) == destination)
+            throw std::runtime_error("FD plot output must have a distinct path: " + result.output);
+    }
+    return result;
+}
 } // namespace
 
 FitInput load_fit_input(const Config &cfg) {
@@ -331,7 +417,8 @@ PullInput load_pull_input(const Config &cfg, const std::string &saved_measuremen
         auto fit = from_measurement(measurement, source, !legacy_fit);
         validate_fit_input(fit, !legacy_fit);
         if (cfg.stage == Stage::pull) print_measurement_summary(measurement);
-        return {std::move(fit), format_esd_table(measurement, source.filename().string())};
+        return {std::move(fit), format_esd_table(measurement, source.filename().string()),
+                load_fd_plot(source, measurement, cfg)};
     }
     auto fit = load_legacy_fit(source, cfg);
     validate_fit_input(fit);
@@ -344,7 +431,7 @@ PullInput load_pull_input(const Config &cfg, const std::string &saved_measuremen
     } else {
         protect_measurement_file(source.parent_path() / (source.stem().string() + "_cov.dat"), cfg);
     }
-    return {std::move(fit), table_contents(table)};
+    return {std::move(fit), table_contents(table), {}};
 }
 
 void validate_fit_input(const FitInput &input, bool diagonal_only) {

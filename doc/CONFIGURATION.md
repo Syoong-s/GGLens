@@ -8,7 +8,7 @@ Pass the configuration file path to `esd_bcg_mpi`. When the path is omitted, the
 | --- | --- |
 | `stage` | `all` runs `measure`, `fit`, and `pull` in order and is the default. `measure` creates the binary measurement snapshot. `fit` reads it and writes the full chain and profile draws. `pull` reads both stages and exports the figures and table. Use `--stage` to override the INI for one launch. |
 | `group-list`, `shear-list` | Paths to the two input lists, required for `measure` and `all`. The defaults are `group_catalogs.list` and `shear_catalogs.list` in the launch directory. [Input formats](INPUTS.md) |
-| `output-dir` | Optional result directory. The measurement snapshot goes in `measurement/`, the two fit archives go in `fit/<prefix>/`, and the three display products go in the result directory. |
+| `output-dir` | Optional result directory. The measurement snapshot goes in `measurement/`, the two fit archives go in `fit/<prefix>/`, and plots and the ESD table go in the result directory. |
 | `output` | Name of the exported ESD table and source of the shared file prefix, by default `ESD_results.dat`. Use a filename with `output-dir`. With `output-dir` omitted, the parent of `output` serves as the result directory. |
 | `cache` | Optional path to save and reuse resolved centers. LWC and NWC add `_lwc` or `_nwc` before the extension. |
 | `scratch-dir` | Directory for temporary files. The default is `.bcg_scratch` inside `output-dir` or beside the ESD table when `output-dir` is omitted. On a multi-node run, use a shared location with sufficient free space. |

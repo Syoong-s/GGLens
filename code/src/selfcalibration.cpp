@@ -11,7 +11,7 @@ void write_fd_points(const bcg::fs::path &path, const std::vector<double> &edges
         std::ofstream out(temporary);
         if (!out) throw std::runtime_error("Cannot write FD points: " + path.string());
         out.exceptions(std::ios::badbit | std::ios::failbit);
-        out << "# component bin gf_low gf_high gf_mean shear sigma n_sources status\n"
+        out << fd_points_header << '\n'
             << "# component 1 = g1/gf1, 2 = g2/gf2\n"
             << "# Bin numbers start at 1. FD intervals use gf_low <= gf < gf_high.\n"
             << "# status 0 = valid, 1 = too few sources, 2 = invalid PDF_SYM fit\n"
