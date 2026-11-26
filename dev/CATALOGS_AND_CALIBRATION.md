@@ -20,7 +20,7 @@ Rank 0 uses the first shear file's first line for the column count and mapping. 
 
 Each source file is assigned by list position modulo the number of source workers. Rank 0 joins the source read for a single-rank run. The duplicate cut compares consecutive RA and Dec against the start of their current group to a tolerance of `1e-7` degree. Groups over the limit are dropped before per-row cuts. Duplicate grouping ends at each file boundary.
 
-Scalar cuts use `threshold >= -999.0` as the enable condition. Map each new named field in the first-header reader and tie its read dependency to the same cut predicate used by the row selector.
+Scalar cuts use `threshold >= -999.0` as the enable condition. List and `ext-` entries use a blank, `null`, or `-9999.0` as a disabled position. The first-header reader resolves the named shear fields, then attaches the `ext-` bounds to their input columns. Bounds on the same column intersect. Finite rows outside those bounds still count toward duplicate groups and are dropped at per-row selection. A column can supply both a magnitude cut and the stellar-locus magnitude. Pair selection uses the column configured in `ext-zp-err` and passes its value through the source scratch records.
 
 The CCD cut uses a sorted, deduplicated vector of IDs. An active list requires the configured one-based CCD column. The selector rounds that value to the nearest integer, with ties away from zero as in Fortran's `NINT`, and drops listed IDs before star-bar fitting and pair collection. The same selected rows feed both the FD calibration and the ESD measurement. Set `excluded_ccds` and `external_columns.ccd_num` to change the compiled defaults. [Defaults](../code/include/esd_defaults.hpp)
 
@@ -32,7 +32,7 @@ d_{1/2}=2(0.2628)\sqrt{A/\pi},\qquad
 s_{\rm rel}=\frac{d_{1/2}-\mathrm{PSF\ FWHM}}{\mathrm{PSF\ FWHM}},
 $$
 
-where $A$ is `half_light_area`. The relative size, selected magnitude, and SNR enter the star-bar stage. The exposure variant also uses a near-integer exposure ID between 1 and 10,000,000.
+where $A$ is `half_light_area`. The relative size, magnitude from `mag-stellar-locus`, and SNR enter the star-bar stage. The exposure variant also uses a near-integer exposure ID between 1 and 10,000,000.
 
 The older 44-column source layout placed external RA, Dec, photo-z, and i-band magnitude at columns 5, 6, 17, and 11. Its last column carried exposure chi-squared. The header rule is independent of width, and an enabled exposure star-bar cut needs the actual exposure ID position in the INI. [Header mapping](../code/src/bcg_shear_catalog.cpp) · [Cut logic](../code/src/bcg_shear_cuts.cpp)
 

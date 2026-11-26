@@ -48,6 +48,7 @@ struct SourceRecord {
     double ra = 0, dec = 0, zp = 0;
     double g1 = 0, g2 = 0, de = 0, h1 = 0, h2 = 0;
     double gf1 = 0, gf2 = 0;
+    double zp_err = 0;
 };
 
 struct Source : SourceRecord {

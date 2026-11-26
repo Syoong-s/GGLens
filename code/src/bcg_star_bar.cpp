@@ -25,7 +25,9 @@ constexpr double mag_width = 1.0;
 // Method: Convert the reference's truncating magnitude bins to zero-based indices.
 // ==========================================
 int mag_bin(double mag) {
-    return static_cast<int>((mag - mag_min) / mag_width);
+    const double bin = (mag - mag_min) / mag_width;
+    if (!(bin > -1 && bin < mag_bins)) return -1;
+    return static_cast<int>(bin);
 }
 
 // ==========================================

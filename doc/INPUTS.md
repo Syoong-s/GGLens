@@ -75,10 +75,10 @@ The required named shear columns for every run are **`g1`, `g2`, `de`, `h1`, `h2
 
 Names are case-insensitive. If an imported column repeats a shear name, put the intended shear column later in the header.
 
-Use degrees for RA and Dec, with RA in `[0, 360)` and Dec in `[-90, 90]`. The default photo-z cuts keep `0 < zp < 5`. For the header below, set `ra = 1`, `dec = 2`, `zp = 3`, `mag = 4`, and `expo-chi2 = -1` under `[external_columns]`. These are one-based positions, with `-1` selecting the last column for exposure quality.
+Use degrees for RA and Dec, with RA in `[0, 360)` and Dec in `[-90, 90]`. The default photo-z cuts keep `0 < zp < 5`. For the header below, set `ra = 1`, `dec = 2`, `zp = 3`, and `expo-chi2 = -1` under `[external_columns]`. These are one-based positions, with `-1` selecting the last column for exposure quality. Set `mag-stellar-locus = 4` to fit the star bar with this magnitude. Use `ext-mag-i = [4, 10, 30]` for a magnitude cut on that column.
 
 ```text
 # ra dec zphot mag g1 g2 de h1 h2 gf1 gf2 half_light_flux half_light_area nstar imax jmax expo_chi2
 ```
 
-Add the columns needed by any optional cuts you enable. Some use named columns, while magnitude, morphology, exposure ID, CCD ID, and exposure quality use column positions. [Source-cut columns](CONFIGURATION.md#source-cuts)
+Add the columns needed by any optional cuts you enable. Magnitudes, magnitude errors, photo-z error, morphology, exposure ID, CCD ID, and exposure quality use column positions. Use `ext-` rules with one-based positions to filter on additional numeric columns. [Source-cut columns](CONFIGURATION.md#source-cuts) · [Additional column cuts](CONFIGURATION.md#additional-column-cuts)

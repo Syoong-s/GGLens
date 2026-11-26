@@ -26,6 +26,7 @@ struct Config {
     double zmin = defaults::zmin, zmax = defaults::zmax;
     double mmin = defaults::mmin, mmax = defaults::mmax;
     double rmin = defaults::rmin, rmax = defaults::rmax, dzmin = defaults::dzmin;
+    double dz_err_k = defaults::dz_err_k;
     CosmologyParameters cosmology;
     int n_r_bins = defaults::n_r_bins, n_jack = defaults::n_jack, pdf_bins = defaults::pdf_bins;
     int memory_mib = defaults::memory_mib;
@@ -53,6 +54,7 @@ struct Config {
     double fd_limit() const {
         return bcg::cut_enabled(cuts.gf_lim) ? cuts.gf_lim : defaults::selfcal_fd_limit;
     }
+    bool uses_pair_redshift_error() const { return dz_err_k != 0.0 && dz_err_k != -9999.0; }
     // ==========================================
     // Function: memory_bytes
     // Method: Convert the rank-local MiB budget to an unsigned byte count.

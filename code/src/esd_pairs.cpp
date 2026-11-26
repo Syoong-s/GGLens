@@ -63,6 +63,7 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
     int rank = 0; MPI_Comm_rank(comm, &rank);
     const auto budget = cfg.memory_bytes();
     const bool need_bar = cfg.cuts.bar_enabled();
+    const bool use_redshift_error = cfg.uses_pair_redshift_error();
     const std::size_t capacity = std::max<std::size_t>(1, budget / 8 / sizeof(bcg::Source));
     if (capacity > static_cast<std::size_t>(std::numeric_limits<int>::max()))
         throw std::runtime_error("Source chunk exceeds KD-tree index limit; reduce run.memory-mb");
@@ -146,10 +147,16 @@ std::vector<std::unique_ptr<bcg::PairStore>> build_pair_spools(
         for (std::size_t li = 0; li < lenses.size(); ++li) {
             const auto &lens = lenses[li]; const auto &geo = geometry[li];
             if (geo.chi <= 0) continue;
+            const double min_zp = lens.z + cfg.dzmin;
             tree.radius(geo.xyz, geo.chord, candidates);
             for (int idx : candidates) {
                 const auto &s = chunk[idx];
-                if (!(s.zp > lens.z + cfg.dzmin)) continue;
+                double threshold = min_zp;
+                if (use_redshift_error) {
+                    if (s.zp_err < 0) continue;
+                    threshold += cfg.dz_err_k * s.zp_err;
+                }
+                if (!(s.zp > threshold)) continue;
                 const auto &l = geo.xyz;
                 const double xy = s.xyz[0] * l[0] + s.xyz[1] * l[1];
                 const double dot = xy + s.xyz[2] * l[2];

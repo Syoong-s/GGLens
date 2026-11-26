@@ -17,7 +17,7 @@ inline constexpr int memory_mib = 512;
 // Lens sample, radial bins, cosmology, and PDF_SYM
 inline constexpr bcg::Center center = bcg::Center::bcg;
 inline constexpr double zmin = 0.3, zmax = 0.4, mmin = 13.0, mmax = 14.2;
-inline constexpr double rmin = 0.1, rmax = 100.0, dzmin = 0.2;
+inline constexpr double rmin = 0.1, rmax = 100.0, dzmin = 0.2, dz_err_k = 0.0;
 inline constexpr double omega_m = 0.315, h = 0.674, sigma8 = 0.811;
 inline constexpr double omega_b_h2 = 0.02237, spectral_index = 0.965, neutrino_mass = 0.06;
 inline constexpr int n_r_bins = 12, n_jack = 400, pdf_bins = 4;
@@ -51,8 +51,7 @@ inline constexpr auto external_columns = [] {
     cols.ra = 5;
     cols.dec = 6;
     cols.zp = 17;
-    cols.mag = 11;
-    cols.ext_mash = 4;
+    cols.mag_stellar_locus = 11;
     cols.expo_num = 0; // Set explicitly for the per-exposure bar.
     cols.ccd_num = 0; // Set explicitly for the CCD cut.
     cols.expo_chi2 = -1; // Last column.
@@ -76,16 +75,13 @@ inline constexpr auto cuts = [] {
     c.gf_lim = gf_lim;
     c.imaxcut = 64.0;
     c.jmaxcut = 64.0;
-    c.mag_low = 10.0;
-    c.mag_high = 30.0;
     c.psf_chi2_mltp = -9999.0;
     c.r_half_thresh = -9999.0;
-    c.ext_cut = -9999.0;
     c.star_bar_mltp = -9999.0;
     c.expo_bar_mltp = -9999.0;
     c.max_dup = 5.0;
     return c;
 }();
 
-inline constexpr std::initializer_list<int> excluded_ccds = {}; // Equivalent to ccd-cut = -9999.0.
+inline constexpr std::initializer_list<int> excluded_ccds = {}; // Equivalent to ccd-cut = [].
 } // namespace bcg_esd::defaults

@@ -4,7 +4,7 @@
 
 `Cosmology` tabulates the flat matter-plus-Lambda comoving distance in `Mpc/h`. It uses 4,001 points through redshift 5, Simpson integration per interval, and cubic Hermite interpolation with exact end slopes. The integrand is $2998/E(z)$, where $E(z)^2=\Omega_m(1+z)^3+1-\Omega_m$.
 
-For each source chunk, build a KD tree of source sky vectors. Query a chord distance of $2\sin(R_{\max}/(2\chi_l))$ around each lens. Retain pairs with $z_s>z_l+\mathrm{dz\_min}$ and a projected radius in $[R_{\min},R_{\max})$. The radius uses the great-circle angle.
+For each source chunk, build a KD tree of source sky vectors. Query a chord distance of $2\sin(R_{\max}/(2\chi_l))$ around each lens. Retain pairs with $z_s>z_l+\mathrm{dz\_min}+k\sigma_{z_s}$ and a projected radius in $[R_{\min},R_{\max})$. When `dz-err-k` is `0` or `-9999.0`, the redshift condition reduces to $z_s>z_l+\mathrm{dz\_min}$. The radius uses the great-circle angle.
 
 $$
 R=\chi_l\,\operatorname{atan2}\left(\left\lVert\hat n_s\times\hat n_l\right\rVert,\;\hat n_s\cdot\hat n_l\right).

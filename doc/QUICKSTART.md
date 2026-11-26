@@ -22,13 +22,13 @@ center = bcg
 ra = 1
 dec = 2
 zp = 3
-mag = 4
+mag-stellar-locus = 4
 expo-chi2 = -1
 ```
 
 Omitted settings use their defaults. For a different lens layout, set positions in `[group_columns]`, `[galaxy_columns]`, and `[member_columns]`. The default group sample has redshifts from `0.3` up to but excluding `0.4` and catalog log masses from `13.0` up to but excluding `14.2`. Set `z-min`, `z-max`, `logm-min`, and `logm-max` in `[measurement]` to choose another sample. Set `[calibration] fd-corrected = true` if field distortion was already removed from the input shear values. [Lens column settings](CONFIGURATION.md#group-galaxy-and-member-columns)
 
-The default measurement uses 12 radial bins from `0.1` to `100.0` comoving Mpc divided by `h`, with automatic calibration enabled. To turn off a default cut, set its value below `-999.0`. [Full INI example](../code/esd.example.ini) · [Configuration guide](CONFIGURATION.md)
+The default measurement uses 12 radial bins from `0.1` to `100.0` comoving Mpc divided by `h`, with automatic calibration enabled. To turn off a default scalar cut, set its value below `-999.0`. [Full INI example](../code/esd.example.ini) · [Configuration guide](CONFIGURATION.md)
 
 ## 3. Launch the program
 

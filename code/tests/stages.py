@@ -42,8 +42,6 @@ starcut = -9999
 chi2-thresh = -9999
 imaxcut = -9999
 jmaxcut = -9999
-mag-low = -9999
-mag-high = -9999
 """
 
 FIT_SETTINGS = f"""\
@@ -139,6 +137,113 @@ def check_streamed_pairs(root, run):
     _, _, _, _, _, rows, replicas = load_measurement(snapshots[0])
     assert rows["count"][0] == 16 * 6 * 96 * copies
     assert np.isfinite(replicas).all()
+
+
+def check_photometric_selection(root, run):
+    inputs = root / "inputs"
+    # The two endpoints of each quality range pass. The lenses are at z=0.35.
+    # At zp-err=0.125, dz-min=0.2 and k=2 give a strict pair threshold of 0.8.
+    cases = (
+        (18, 24, 0.01, 0.10, 0.025, 0.9),
+        (21, 21, 0.05, 0.06, 0.25, 1.1),
+        (17, 23, 0.03, 0.07, 0.125, 0.9),
+        (22, 23, 0.03, 0.07, 0.125, 0.9),
+        (20, 20, 0.03, 0.07, 0.125, 0.9),
+        (20, 25, 0.03, 0.07, 0.125, 0.9),
+        (20, 23, 0.009, 0.07, 0.125, 0.9),
+        (20, 23, 0.051, 0.07, 0.125, 0.9),
+        (20, 23, 0.03, 0.059, 0.125, 0.9),
+        (20, 23, 0.03, 0.11, 0.125, 0.9),
+        (20, 23, 0.03, 0.07, 0.02, 0.9),
+        (20, 23, 0.03, 0.07, 0.26, 1.2),
+        (20, 23, 0.03, 0.07, 0.125, 0.8),
+        (20, 23, 0.03, 0.07, 0.125, 0.79),
+        (20, 23, 0.03, 0.07, 0.125, 0.81),
+        (20, 23, 0.03, 0.07, 0.125, 0.55),
+    )
+    repeats = 6
+    for i in range(2):
+        header, *sources = (inputs / f"sources{i}.dat").read_text().splitlines()
+        header += " mag_g mag_r unused magerr_g magerr_r zp_err locus half_light_flux half_light_area psf_fwhm score mash"
+        rows = [header]
+        for source, (mag_g, mag_r, err_g, err_r, zp_err, zp) in zip(sources, cases * repeats):
+            values = source.split()
+            values[2] = str(zp)
+            score = -999 if zp == 0.79 else -1000
+            mash = 2 if zp == 0.81 else 1
+            rows.append(" ".join(values) +
+                        f" {mag_g} {mag_r} unused {err_g} {err_r} {zp_err} 35 100 16 0.25 {score} {mash}")
+        (inputs / f"photometry{i}.dat").write_text("\n".join(rows) + "\n")
+    (inputs / "photometry.list").write_text("photometry0.dat\nphotometry1.dat\n")
+
+    bare = CATALOG_SETTINGS.replace("n-r-bins = 7\nn-jack = 12", "n-r-bins = 1\nn-jack = 2")
+    settings = bare.replace("inputs/shear.list", "inputs/photometry.list").replace(
+        "zp = 3\n", """\
+zp = 3
+mag-stellar-locus = 17
+ext-mag-g = [11, 18, 21]
+ext-mag-r = [12, 21, 24]
+ext-mag-unused = [13, null, ]
+ext-mag-err-g = [14, 0.01, 0.05]
+ext-mag-err-r = [15, 0.06, 0.10]
+ext-zp-err = [16, 0.025, 0.25]
+""")
+
+    def measure(name, settings, k, error=None):
+        run(name, f"[run]\nstage = measure\noutput-dir = {name}\noutput = sample.dat\n" +
+            settings.replace("[measurement]\n", f"[measurement]\ndz-err-k = {k}\n"), error=error)
+        if error is None:
+            _, _, _, fields, _, rows, _ = load_measurement(measurement_path(root / name))
+            return fields[6], rows["count"].sum()
+
+    assert measure("photometry", settings, 2) == (2 * repeats * 6, 2 * repeats * 3)
+    no_mag_errors = settings.replace("ext-mag-err-g = [14, 0.01, 0.05]", "ext-mag-err-g = null").replace(
+        "ext-mag-err-r = [15, 0.06, 0.10]", "ext-mag-err-r = -9999.0"
+    )
+    assert measure("photometry-no-mag-errors", no_mag_errors, 2) == (2 * repeats * 10, 2 * repeats * 7)
+    morphology = settings.replace("zp = 3\n", "zp = 3\next-mash = [22, 1, 1]\n")
+    assert measure("photometry-morphology", morphology, 2) == (2 * repeats * 5, 2 * repeats * 2)
+    assert measure("photometry-star-bar", settings + "star-bar-mltp = 1\n", 2) == (2 * repeats * 6, 2 * repeats * 3)
+    assert measure("photometry-error-cut-only", settings, 0) == (2 * repeats * 6, 2 * repeats * 5)
+    pair_only = settings.replace("ext-zp-err = [16, 0.025, 0.25]", "ext-zp-err = [16, null, null]")
+    assert measure("photometry-pair-error-only", pair_only, 2) == (2 * repeats * 8, 2 * repeats * 5)
+    assert measure("photometry-fixed-zp", settings + "zplow = 0.79\nzphigh = 1.1\n", 2) == (
+        2 * repeats * 3, 2 * repeats * 2
+    )
+    measure("photometry-bad-length", settings.replace("[11, 18, 21]", "[11, 18]"), 2,
+            error="expected [column, lower limit, upper limit]")
+    for name, value in (("bad-brackets", "[11, 18, 21"), ("legacy-list", "11, 18, 21"), ("legacy-single", "11")):
+        measure(f"photometry-{name}", settings.replace("[11, 18, 21]", value), 2,
+                error="expected a square-bracketed list")
+    measure("photometry-old-cut-key", settings + "mag-low = [18, 21]\n", 2,
+            error="Unknown setting cuts.mag-low")
+
+    # Intersect custom limits on zp and reuse a named shear field without masking its mapping.
+    custom = settings.replace("zp = 3\n", """\
+zp = 3
+ext-zp-low = [3, 0.79, null]
+ext-zp-high = [3, -9999.0, 0.9]
+ext-de = [6, 1, 1]
+ext-score = [21, , -1000]
+ext-absent = [null, 1, 2]
+ext-unused = [13, null, -9999.0]
+ext-outside = [999, , ]
+ext-off-blank =
+ext-off-null = null
+ext-off-sentinel = -9999.0
+ext-off-list = []
+""")
+    assert measure("external-column-cuts", custom, 2) == (2 * repeats * 3, 2 * repeats * 2)
+    measure("external-column-bad-range", custom.replace("[3, 0.79, null]", "[3, 0.9, 0.79]"), 2,
+            error="lower limit exceeds upper limit")
+    measure("external-column-bad-position", custom.replace("[21, , -1000]", "[999, , -1000]"), 2,
+            error="Set external_columns.ext-score to a valid one-based column number")
+
+    # These catalogs have no error column. A disabled k bypasses column lookup.
+    bare = bare.replace("zp = 3\n", "zp = 3\next-zp-err = [16, null, null]\n")
+    for k in (0, -9999.0):
+        assert measure(f"no-photo-z-error-{k}", bare, k) == (16 * 6 * 96, 16 * 6 * 96)
+    measure("missing-photo-z-error", bare, 2, error="Set external_columns.ext-zp-err")
 
 
 def check_fd_points(root, run):
@@ -344,6 +449,7 @@ def main():
 
         check_lossless_codec(root)
         write_inputs(root / "inputs")
+        check_photometric_selection(root, run)
         check_streamed_pairs(root, run)
         check_fd_points(root, run)
         combined = root / "combined"
@@ -429,7 +535,7 @@ def main():
         run("bad-legacy", "[run]\nstage = fit\noutput-dir = bad\n" + FIT_SETTINGS + f"input = {bad_legacy}\n",
             error="Unsupported ESD fit input version")
 
-    print("FD points and plots, combined and split stages, lossless archive, and legacy ESD checks passed")
+    print("Source selection, FD points and plots, combined and split stages, lossless archive, and legacy ESD checks passed")
 
 
 if __name__ == "__main__":

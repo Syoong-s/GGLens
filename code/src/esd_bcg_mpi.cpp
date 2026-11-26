@@ -18,8 +18,9 @@ void measure(bcg_esd::Config &cfg, MPI_Comm comm) {
     std::vector<std::string> files;
     if (!rank) files = bcg::read_shear_list(cfg.shear_list);
     bcg::broadcast_paths(files, comm);
-    const auto layout = bcg::read_shear_layout(files.front(), cfg.external_columns, cfg.cuts, comm);
-    if (!rank) std::cout << "First shear catalog columns: " << layout.destinations.size() << '\n'
+    const auto layout = bcg::read_shear_layout(files.front(), cfg.external_columns, cfg.cuts,
+                                             cfg.uses_pair_redshift_error(), comm);
+    if (!rank) std::cout << "First shear catalog columns: " << layout.columns.size() << '\n'
                          << "Restore catalog FD: " << cfg.fd_corrected << '\n'
                          << "Shear files: " << files.size() << ", ranks: " << size
                          << ", buffer budget per rank: " << cfg.memory_mib << " MiB\n"

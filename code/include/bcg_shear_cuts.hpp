@@ -1,10 +1,11 @@
 #pragma once
 #include "bcg_shear_catalog.hpp"
+#include <optional>
 
 namespace bcg {
 // ==========================================
 // Function: cut_enabled
-// Method: Honor the common disabled threshold for all catalog cuts.
+// Method: Honor the disabled threshold for scalar catalog cuts.
 // ==========================================
 constexpr bool cut_enabled(double threshold) {
     return threshold >= -999.0;
@@ -18,9 +19,14 @@ struct CutThresholds {
     double snrfcut, snrlow, snrhigh, starcut;
     double chi2_thresh, flagcut, zplow, zphigh;
     double gf_lim, imaxcut, jmaxcut;
-    double mag_low, mag_high, psf_chi2_mltp;
-    double r_half_thresh, ext_cut;
+    double psf_chi2_mltp, r_half_thresh;
     double star_bar_mltp, expo_bar_mltp, max_dup;
+};
+
+struct ExternalColumnCut {
+    std::string key;
+    int column;
+    std::optional<double> low, high;
 };
 
 // ==========================================
@@ -29,6 +35,7 @@ struct CutThresholds {
 // ==========================================
 struct Cuts : CutThresholds {
     std::vector<int> excluded_ccds; // Sorted during configuration validation.
+    std::vector<ExternalColumnCut> external{};
 
     // ==========================================
     // Function: ccd_cut_enabled
@@ -44,10 +51,9 @@ struct Cuts : CutThresholds {
     bool bar_enabled() const { return cut_enabled(star_bar_mltp) || exposure_bar_enabled(); }
 
     // ==========================================
-    // Function: needs_magnitude / needs_snr / needs_psf
+    // Function: needs_snr / needs_psf
     // Method: Identify the columns consumed by the enabled cuts and stellar-bar fit.
     // ==========================================
-    bool needs_magnitude() const { return bar_enabled() || cut_enabled(mag_low) || cut_enabled(mag_high); }
     bool needs_snr() const { return bar_enabled() || cut_enabled(snrlow) || cut_enabled(snrhigh); }
     bool needs_psf() const { return bar_enabled() || cut_enabled(r_half_thresh); }
 };

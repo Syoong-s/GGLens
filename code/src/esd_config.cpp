@@ -36,31 +36,71 @@ std::string parse_ini_value(const std::string &input) {
     return bcg::trim(value.substr(0, value.find('#')));
 }
 
-// ==========================================
-// Function: parse_ccd_cut
-// Method: Read a comma-separated list of CCD IDs or the common disabled value.
-// ==========================================
-std::vector<int> parse_ccd_cut(const std::string &input) {
-    const std::string value = bcg::trim(input);
-    if (value.empty()) return {};
-    if (value.front() == '-' && value.find(',') == std::string::npos) {
-        std::size_t end = 0;
-        const double threshold = std::stod(value, &end);
-        if (end == value.size() && std::isfinite(threshold) && !bcg::cut_enabled(threshold)) return {};
-    }
+template <typename T>
+T parse_number(const std::string &value) {
+    std::size_t end = 0;
+    T number;
+    if constexpr (std::is_same_v<T, double>) number = std::stod(value, &end);
+    else number = std::stoi(value, &end);
+    if (end != value.size() || !std::isfinite(number))
+        throw std::invalid_argument("expected a finite number");
+    return number;
+}
 
-    if (value.back() == ',') throw std::invalid_argument("expected a CCD ID after the last comma");
+bool is_disabled_list_value(const std::string &value) {
+    if (value.empty() || value == "null") return true;
+    if (value.front() != '-') return false;
+    char *end = nullptr;
+    const double number = std::strtod(value.c_str(), &end);
+    return number == -9999.0 && end == value.c_str() + value.size();
+}
+
+std::vector<std::string> list_entries(const std::string &input) {
+    const std::string value = bcg::trim(input);
+    if (is_disabled_list_value(value)) return {};
+    if (value.front() != '[' || value.back() != ']')
+        throw std::invalid_argument("expected a square-bracketed list");
+    const auto contents = bcg::trim(value.substr(1, value.size() - 2));
+    if (contents.empty()) return {};
+
+    std::vector<std::string> entries;
+    std::size_t start = 0;
+    for (;;) {
+        const auto comma = contents.find(',', start);
+        entries.push_back(bcg::trim(contents.substr(start, comma - start)));
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return entries;
+}
+
+template <typename T>
+std::optional<T> parse_optional_number(const std::string &value) {
+    if (is_disabled_list_value(value)) return std::nullopt;
+    return parse_number<T>(value);
+}
+
+std::vector<int> parse_ccd_cut(const std::string &value) {
     std::vector<int> ids;
-    std::istringstream entries(value);
-    for (std::string token; std::getline(entries, token, ',');) {
-        token = bcg::trim(token);
-        std::size_t end = 0;
-        const int id = std::stoi(token, &end);
-        if (end != token.size() || id < 0)
-            throw std::invalid_argument("expected nonnegative integer CCD IDs separated by commas");
-        ids.push_back(id);
+    for (const auto &entry : list_entries(value)) {
+        const auto id = parse_optional_number<int>(entry);
+        if (!id) continue;
+        if (*id < 0) throw std::invalid_argument("expected nonnegative integer CCD IDs");
+        ids.push_back(*id);
     }
     return ids;
+}
+
+std::optional<bcg::ExternalColumnCut> parse_external_cut(const std::string &key, const std::string &value) {
+    const auto entries = list_entries(value);
+    if (entries.empty() || (entries.size() == 1 && is_disabled_list_value(entries.front()))) return std::nullopt;
+    if (entries.size() != 3) throw std::invalid_argument("expected [column, lower limit, upper limit]");
+    const auto column = parse_optional_number<int>(entries[0]);
+    const auto low = parse_optional_number<double>(entries[1]);
+    const auto high = parse_optional_number<double>(entries[2]);
+    if (!column) return std::nullopt;
+    if (low && high && *low > *high) throw std::invalid_argument("lower limit exceeds upper limit");
+    return bcg::ExternalColumnCut{key, *column, low, high};
 }
 
 // ==========================================
@@ -68,8 +108,8 @@ std::vector<int> parse_ccd_cut(const std::string &input) {
 // Method: Overlay typed INI keys on compiled defaults and report invalid keys at their line.
 // ==========================================
 void apply_ini(Config &c, const std::string &text) {
-    using Setting = std::variant<std::string *, double *, int *, bool *, Stage *, bcg::Center *, std::vector<int> *,
-                                 bcg::CatalogDelimiter *, bcg::MassFormat *>;
+    using Setting = std::variant<std::string *, double *, int *, bool *, Stage *, bcg::Center *,
+                                 std::vector<int> *, bcg::CatalogDelimiter *, bcg::MassFormat *>;
     auto &[group, galaxy, member] = c.lens_columns;
     const std::unordered_map<std::string, Setting> settings{
         {"run.stage", &c.stage},
@@ -88,6 +128,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"measurement.r-min", &c.rmin},
         {"measurement.r-max", &c.rmax},
         {"measurement.dz-min", &c.dzmin},
+        {"measurement.dz-err-k", &c.dz_err_k},
         {"measurement.omega-m", &c.cosmology.omega_m},
         {"measurement.h", &c.cosmology.h},
         {"measurement.sigma8", &c.cosmology.sigma8},
@@ -132,8 +173,7 @@ void apply_ini(Config &c, const std::string &text) {
         {"external_columns.ra", &c.external_columns.ra},
         {"external_columns.dec", &c.external_columns.dec},
         {"external_columns.zp", &c.external_columns.zp},
-        {"external_columns.mag", &c.external_columns.mag},
-        {"external_columns.ext-mash", &c.external_columns.ext_mash},
+        {"external_columns.mag-stellar-locus", &c.external_columns.mag_stellar_locus},
         {"external_columns.expo-num", &c.external_columns.expo_num},
         {"external_columns.ccd-num", &c.external_columns.ccd_num},
         {"external_columns.expo-chi2", &c.external_columns.expo_chi2},
@@ -147,11 +187,8 @@ void apply_ini(Config &c, const std::string &text) {
         {"cuts.zphigh", &c.cuts.zphigh},
         {"cuts.imaxcut", &c.cuts.imaxcut},
         {"cuts.jmaxcut", &c.cuts.jmaxcut},
-        {"cuts.mag-low", &c.cuts.mag_low},
-        {"cuts.mag-high", &c.cuts.mag_high},
         {"cuts.psf-chi2-mltp", &c.cuts.psf_chi2_mltp},
         {"cuts.r-half-thresh", &c.cuts.r_half_thresh},
-        {"cuts.ext-cut", &c.cuts.ext_cut},
         {"cuts.max-dup", &c.cuts.max_dup},
         {"cuts.star-bar-mltp", &c.cuts.star_bar_mltp},
         {"cuts.expo-bar-mltp", &c.cuts.expo_bar_mltp},
@@ -189,15 +226,21 @@ void apply_ini(Config &c, const std::string &text) {
         }
         const auto equal = line.find('=');
         if (equal == std::string::npos) throw error("Expected key=value");
-        const std::string key = section + "." + bcg::trim(line.substr(0, equal));
+        const auto name = bcg::trim(line.substr(0, equal));
+        const std::string key = section + "." + name;
         const auto found = settings.find(key);
-        if (found == settings.end()) throw error("Unknown setting " + key);
+        const bool external_cut = found == settings.end() && section == "external_columns" &&
+                                  name.size() > 4 && name.compare(0, 4, "ext-") == 0;
+        if (found == settings.end() && !external_cut) throw error("Unknown setting " + key);
         if (!seen.insert(key).second) throw error("Repeated setting " + key);
         const auto value = parse_ini_value(line.substr(equal + 1));
         try {
+            if (external_cut) {
+                if (auto cut = parse_external_cut(name, value)) c.cuts.external.push_back(std::move(*cut));
+                continue;
+            }
             std::visit([&](auto dest) {
                 using T = std::remove_pointer_t<decltype(dest)>;
-                std::size_t end = 0;
                 if constexpr (std::is_same_v<T, std::string>) {
                     *dest = value;
                 } else if constexpr (std::is_same_v<T, std::vector<int>>) {
@@ -220,10 +263,7 @@ void apply_ini(Config &c, const std::string &text) {
                     else if (value == "false" || value == "0") *dest = false;
                     else throw std::invalid_argument("expected true/false or 1/0");
                 } else {
-                    if constexpr (std::is_same_v<T, double>) *dest = std::stod(value, &end);
-                    else *dest = std::stoi(value, &end);
-                    if (end != value.size() || !std::isfinite(*dest))
-                        throw std::invalid_argument("expected a finite number");
+                    *dest = parse_number<T>(value);
                 }
             }, found->second);
         } catch (const std::logic_error &e) {
@@ -259,8 +299,7 @@ void validate_measurement_config(Config &c) {
         throw std::runtime_error("cuts.max-dup must be a positive integer or below -999");
     if (cut_enabled(cuts.gf_lim) && cuts.gf_lim < 0)
         throw std::runtime_error("calibration.gf-lim must be nonnegative or below -999");
-    if ((cut_enabled(cuts.mag_low) && cut_enabled(cuts.mag_high) && cuts.mag_high < cuts.mag_low) ||
-        (cut_enabled(cuts.zplow) && cut_enabled(cuts.zphigh) && cuts.zphigh <= cuts.zplow) ||
+    if ((cut_enabled(cuts.zplow) && cut_enabled(cuts.zphigh) && cuts.zphigh <= cuts.zplow) ||
         (cut_enabled(cuts.snrlow) && cut_enabled(cuts.snrhigh) && cuts.snrhigh < cuts.snrlow))
         throw std::runtime_error("Invalid shear-cut parameter range");
     if (static_cast<std::uint64_t>(c.pdf_bins + 1LL) * 400 > static_cast<std::uint64_t>(std::numeric_limits<int>::max()) ||

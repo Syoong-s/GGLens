@@ -9,6 +9,7 @@ using Field = ShearRow::Field;
 // Method: Apply the active cuts and prepare the measurements and optional stellar-bar inputs.
 // ==========================================
 bool select_shear_row(const ShearRow &row, const Cuts &cuts, Source &source, BarDatum &bar) {
+    if (!row.passes_column_cuts) return false;
     const auto &v = row.values;
     // Use the nearest integer CCD ID, as in the FD catalog filter.
     if (cuts.ccd_cut_enabled() &&
@@ -17,15 +18,11 @@ bool select_shear_row(const ShearRow &row, const Cuts &cuts, Source &source, Bar
 
     const double ra = v[Field::ra], dec = v[Field::dec], zp = v[Field::zp];
     const double gf1 = v[Field::gf1], gf2 = v[Field::gf2];
-    const double mag = v[Field::mag];
 
     // Sky coordinates and photometric selection.
     if (ra < 0 || ra >= 360 || dec < -90 || dec > 90) return false;
     if (cut_enabled(cuts.zplow) && zp <= cuts.zplow) return false;
     if (cut_enabled(cuts.zphigh) && zp >= cuts.zphigh) return false;
-    if (cut_enabled(cuts.mag_low) && mag < cuts.mag_low) return false;
-    if (cut_enabled(cuts.mag_high) && mag > cuts.mag_high) return false;
-    if (cut_enabled(cuts.ext_cut) && std::abs(v[Field::ext_mash] - cuts.ext_cut) > 1e-3) return false;
 
     // Exposure, PSF, and stamp quality.
     if (cut_enabled(cuts.chi2_thresh) && v[Field::chi2] > cuts.chi2_thresh) return false;
@@ -50,9 +47,9 @@ bool select_shear_row(const ShearRow &row, const Cuts &cuts, Source &source, Bar
     if (cut_enabled(cuts.r_half_thresh) && rhalf <= cuts.r_half_thresh * psf) return false;
 
     source = Source({ra, dec, zp, v[Field::g1], v[Field::g2], v[Field::de],
-                     v[Field::h1], v[Field::h2], gf1, gf2});
+                     v[Field::h1], v[Field::h2], gf1, gf2, v[Field::zp_err]});
     if (cuts.bar_enabled()) {
-        bar = {mag, (rhalf - psf) / psf, snr, 0};
+        bar = {v[Field::mag_stellar_locus], (rhalf - psf) / psf, snr, 0};
         if (cuts.exposure_bar_enabled()) {
             const double exposure = v[Field::expo_num];
             if (exposure < 1 || exposure > 10000000)

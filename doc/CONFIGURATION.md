@@ -26,8 +26,11 @@ The release archive includes an annotated template with every supported INI key.
 | `r-min`, `r-max` | `0.1`, `100.0` | Projected radius range in comoving Mpc divided by `h`. The lower limit is included and the upper limit is excluded. |
 | `n-r-bins` | `12` | Number of radial bins, up to `256`. Measurement alone needs at least one bin. The fit needs at least six bins with complete jackknife measurements. |
 | `dz-min` | `0.2` | A source must be more than this redshift difference behind its group. |
+| `dz-err-k` | `0` | Add this factor times the source photo-z error to `dz-min`. Set `0` or `-9999.0` to use `dz-min` alone. |
 | `n-jack` | `400` | Target number of sky regions for measurement uncertainties. Use at least `2` for measurement only or `7` for `all`. The fit needs more usable regions than fitted radial bins. |
 | `pdf-bins` | `4` | Keep the default for a standard run. |
+
+With `dz-err-k` enabled, pairs require `z_source > z_lens + dz-min + dz-err-k × z_error` and a nonnegative source photo-z error. Set the error column with `ext-zp-err`. Its optional quality limits can be applied independently of `dz-err-k`.
 
 Use matching cosmology settings when comparing samples. The defaults are `omega-m` at `0.315`, `h` at `0.674`, `sigma8` at `0.811`, `omega-b-h2` at `0.02237`, `spectral-index` at `0.965`, and `neutrino-mass` at `0.06` eV. The program generates its fit inputs from these settings.
 
@@ -61,33 +64,53 @@ Set each applicable key in `[external_columns]` to its one-based position in the
 | Key | Default | When to set it |
 | --- | ---: | --- |
 | `ra`, `dec`, `zp` | `5`, `6`, `17` | In every run, match your RA, Dec, and photometric redshift columns. |
-| `mag` | `11` | Select the magnitude band for magnitude or star-bar cuts. |
-| `ext-mash` | `4` | Set when using `ext-cut`. |
+| `mag-stellar-locus` | `11` | Select the magnitude column for the global or per-exposure star-bar fit. |
 | `expo-num` | `0` (unset) | Supply the exposure ID position when using `expo-bar-mltp`. |
 | `ccd-num` | `0` (unset) | Supply the `CCD_NUM` column position when using `ccd-cut`. |
 | `expo-chi2` | `-1` | Supply the exposure quality position when using `chi2-thresh`. Use `-1` for the last column. |
 
+### Additional column cuts
+
+Use `ext-<name> = [column, lower limit, upper limit]` under `[external_columns]` for morphology, magnitudes, magnitude errors, and other numeric columns. Add one rule for each quantity or band you want to cut and give each rule a unique name. Use `ext-zp-err` for the source photo-z error.
+
+```ini
+[external_columns]
+zp = 17
+mag-stellar-locus = 11
+ext-mash = [4, 0, 0]
+ext-mag-g = [11, 18, 25]
+ext-mag-r = [13, 19, 24]
+ext-mag-err-g = [12, 0, 0.2]
+ext-mag-err-r = [14, 0, 0.15]
+ext-zp-err = [18, 0, 0.1]
+ext-snr = [22, 10, null]
+```
+
+Column numbers are one-based and limits include their endpoints. Every active rule must pass, including when several rules use the same column or a column also used in measurement. Use a blank, `null`, or `-9999.0` for a disabled slot in the triplet. A disabled column or two disabled bounds skips the range cut. A blank value, `null`, `-9999.0`, or `[]` can disable the whole entry.
+
+Set `ext-zp-err = [18, null, null]` to use column 18 in pair selection without an error range cut. An active `dz-err-k` requires a valid column in `ext-zp-err`. Configure the redshift itself with the scalar `zp` column and `zplow` and `zphigh` limits in `[cuts]`.
+
+Use `ext-mag-i = [11, 10, 30]` to reproduce the former default magnitude cut. For a previous morphology target of `1` in column 4 with a tolerance of `0.001`, use `ext-mash = [4, 0.999, 1.001]`.
+
 ## Source cuts
 
-Set a threshold **below `-999.0`** to disable its cut. Values at or above `-999.0` are active, including `0` and negative thresholds. Omitted keys keep the defaults shown below. Each active cut needs its listed columns, including any columns shared with a disabled cut.
+Set a scalar threshold below `-999.0` to disable its cut. Omitted keys use the defaults shown in the table.
 
 | Cut key | Default | Behavior | Required column or setting |
 | --- | --- | --- | --- |
 | `snrfcut` | `-9999.0` (off) | Keep values at least this threshold. | `snr_f` |
 | `snrlow`, `snrhigh` | `10`, `-9999.0` (off) | Keep this source signal-to-noise range, including its endpoints. | `half_light_flux`, `half_light_area` |
 | `zplow`, `zphigh` | `0`, `5` | Keep source photo-z strictly between the active limits. | `zp` |
-| `mag-low`, `mag-high` | `10`, `30` | Keep the magnitude range, including its endpoints. | `mag` |
-| `ext-cut` | `-9999.0` (off) | Keep the specified morphology value within `0.001`. | `ext-mash` |
 | `starcut` | `16` | Require at least this number of stars. | `nstar` |
 | `chi2-thresh`, `psf-chi2-mltp` | `0.01`, `-9999.0` (off) | Keep the corresponding quality value at or below the threshold. | `expo-chi2` and `poly_chi2`, respectively |
 | `flagcut` | `-9999.0` (off) | Keep `flag × sigma` at or below the threshold. | `flag`, `sigma` |
 | `imaxcut`, `jmaxcut` | `64`, `64` | Keep each value strictly below its active limit. | `imax`, `jmax` |
 | `r-half-thresh` | `-9999.0` (off) | Require a source-to-PSF size ratio above this threshold. | `half_light_area`, `psf_fwhm` |
-| `star-bar-mltp`, `expo-bar-mltp` | Both `-9999.0` (off) | Set the global or per-exposure star rejection cut. Per-exposure selection takes precedence when both are enabled. | `mag`, `half_light_flux`, `half_light_area`, `psf_fwhm`. The per-exposure cut also requires `expo-num`. |
-| `ccd-cut` | `-9999.0` (off) | Exclude rows with any of the listed CCD IDs, across all exposures and shear catalogs. | `ccd-num` |
+| `star-bar-mltp`, `expo-bar-mltp` | Both `-9999.0` (off) | Set the global or per-exposure star rejection cut. Per-exposure selection takes precedence when both are enabled. | `mag-stellar-locus`, `half_light_flux`, `half_light_area`, `psf_fwhm`. The per-exposure cut also requires `expo-num`. |
+| `ccd-cut` | `[]` (off) | Exclude rows with any of the listed CCD IDs, across all exposures and shear catalogs. | `ccd-num` |
 | `max-dup` | `5` | Set a positive integer maximum for adjacent rows with the same source position. Blocks over the limit are dropped. | `ra`, `dec` |
 
-Enter any number of nonnegative CCD IDs on one line, separated by commas. For example, `ccd-cut = 2, 31, 53, 61` excludes those four CCDs from measurement and self-calibration. Set `ccd-num = 19` if your `CCD_NUM` is in the 19th column. A blank `ccd-cut` or a single value below `-999.0` disables it.
+Enter nonnegative CCD IDs in a list, such as `ccd-cut = [2, 31, 53, 61]`, to exclude those CCDs from measurement and self-calibration. A single ID still uses brackets, such as `ccd-cut = [2]`. Set `ccd-num = 19` if your `CCD_NUM` is in the 19th column. Use `[]`, a blank value, `null`, or `-9999.0` to disable the cut. Blank, `null`, and `-9999.0` entries inside a list are skipped.
 
 ## Calibration
 
