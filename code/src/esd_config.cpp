@@ -22,6 +22,20 @@ void validate_cosmology(const CosmologyParameters &c) {
 }
 
 namespace {
+std::string parse_ini_value(const std::string &input) {
+    const std::string value = bcg::trim(input);
+    if (!value.empty() && (value.front() == '"' || value.front() == '\'')) {
+        // A closing quote is followed only by whitespace or an inline comment.
+        for (auto end = value.find(value.front(), 1); end != std::string::npos;
+             end = value.find(value.front(), end + 1)) {
+            const auto tail = value.find_first_not_of(" \t\r\n", end + 1);
+            if (tail == std::string::npos || value[tail] == '#')
+                return value.substr(1, end - 1);
+        }
+    }
+    return bcg::trim(value.substr(0, value.find('#')));
+}
+
 // ==========================================
 // Function: parse_ccd_cut
 // Method: Read a comma-separated list of CCD IDs or the common disabled value.
@@ -179,10 +193,7 @@ void apply_ini(Config &c, const std::string &text) {
         const auto found = settings.find(key);
         if (found == settings.end()) throw error("Unknown setting " + key);
         if (!seen.insert(key).second) throw error("Repeated setting " + key);
-        std::string value = bcg::trim(line.substr(equal + 1));
-        if (value.size() >= 2 && ((value.front() == '"' && value.back() == '"') ||
-                                  (value.front() == '\'' && value.back() == '\'')))
-            value = value.substr(1, value.size() - 2);
+        const auto value = parse_ini_value(line.substr(equal + 1));
         try {
             std::visit([&](auto dest) {
                 using T = std::remove_pointer_t<decltype(dest)>;

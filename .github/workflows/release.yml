@@ -53,6 +53,7 @@ jobs:
             fi
           done
           test -f "$code_dir/Makefile"
+          test -f "$code_dir/esd.example.ini"
           if grep -Eq 'tests/|test-(catalogs|stages)|test_catalogs|GNUmakefile' "$code_dir/Makefile"; then
             printf 'Unexpected development rule in source archive Makefile\n' >&2
             exit 1

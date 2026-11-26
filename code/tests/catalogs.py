@@ -141,9 +141,10 @@ def write_sample(root, layout):
 
 
 def load(root, launcher, ranks, center, settings, cache=False, error=None):
-    cache_line = "cache = lenses.dat\n" if cache else ""
+    cache_line = "cache = 'lenses #1.dat' # Keep the hash in the filename\n" if cache else ""
     (root / "run.ini").write_text(
-        f"[run]\ngroup-list = catalogs.list\n{cache_line}[measurement]\ncenter = {center}\n{settings}"
+        f'[run]\ngroup-list = "catalogs.list" # Lens inputs\n{cache_line}'
+        f"[measurement]\ncenter = {center} # Group center\nn-r-bins = 12 # Radial bins\n{settings}"
     )
     result = subprocess.run(launcher(ranks), cwd=root, capture_output=True, text=True, timeout=30)
     if error is not None:
@@ -205,6 +206,7 @@ def main():
         root = Path(tmp) / "wide"
         _, log = load(root, launcher, 1, "bcg", WIDE, cache=True)
         assert "from cache" not in log, log
+        assert (root / "lenses #1.dat").is_file()
         lenses, log = load(root, launcher, 4, "bcg", WIDE, cache=True)
         assert "from cache" in log, log
         check_centers(lenses, "bcg")

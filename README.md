@@ -11,6 +11,6 @@ Run measurement, fitting, and export together or as independent stages. Measurem
 | [Configuration](doc/CONFIGURATION.md) | Center choice, sample limits, and optional settings |
 | [Results](doc/RESULTS.md) | Output filenames, units, and table columns |
 
-Download `FQ_GGLens-v<version>.tar.gz` from GitHub Releases. Run `make -C code` from the extracted archive or repository root to build `code/esd_bcg_mpi`. Open the matching tag for these guides and the example INI. [Example configuration](code/esd.example.ini)
+Download `FQ_GGLens-v<version>.tar.gz` from GitHub Releases. Run `make -C code` from the extracted archive or repository root to build `code/esd_bcg_mpi`. Use the bundled `code/esd.example.ini` as a template for your run. Open the matching tag for these guides. [Example configuration](code/esd.example.ini)
 
 FQ GGLens is distributed under the [MIT License](LICENSE).

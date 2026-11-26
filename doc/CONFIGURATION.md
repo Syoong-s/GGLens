@@ -2,6 +2,8 @@
 
 Pass the configuration file path to `esd_bcg_mpi`. When the path is omitted, the program looks for `esd.ini` in the launch directory and uses built-in defaults if the file is absent. Omitted keys use their defaults. Relative paths in the INI start from the launch directory, with the output path rules below.
 
+The release archive includes an annotated template with every supported INI key. A `#` after a value starts an inline comment. Use single or double quotes to keep a literal `#` in a path or title. [INI template](../code/esd.example.ini)
+
 ## Run paths
 
 | Key under `[run]` | What to set |
