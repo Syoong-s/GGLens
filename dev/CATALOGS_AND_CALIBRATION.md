@@ -44,7 +44,7 @@ Per-exposure fitting uses its own size window around `[-0.5, 0.2]` when selectin
 
 ## Field distortion
 
-Define $B_1=de-h_1$ and $B_2=de+h_1$. If `fd-corrected` is enabled, restore the raw moments before the source spool is written.
+Define $B_1=de-h_1$ and $B_2=de+h_1$. If `fd-corrected` is enabled, restore the raw moments when reading each quality-selected source row.
 
 $$
 G_{1,\rm raw}=G_{1,\rm cat}+gf_1B_1-gf_2h_2,\qquad

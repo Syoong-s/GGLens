@@ -19,6 +19,14 @@ inline std::array<double, 3> sky_xyz(double ra, double dec) {
     return {c * std::cos(a), c * std::sin(a), std::sin(d)};
 }
 
+// East and north share a cos(source Dec) factor, which cancels in the bearing.
+inline double source_bearing(const double *source, const std::array<double, 3> &lens,
+                             double xy, double east) {
+    const double north = (source[0] * source[0] + source[1] * source[1]) * lens[2]
+        - source[2] * xy;
+    return std::atan2(north, east);
+}
+
 class Cosmology {
     double omega_m_, h_, dz_;
     std::vector<double> chi_;
@@ -65,7 +73,7 @@ public:
     // Function: beta
     // Method: Inverse comoving Sigma_crit in pc^2/(h M_sun).
     // ==========================================
-    double beta(double zl, double zs, double chil, double chis) const {
+    static double beta(double zl, double zs, double chil, double chis) {
         if (zs <= zl || chis <= chil || chil <= 0) return 0;
         return 1e12 * chil * (chis - chil) * (1.0 + zl) / (1.661e18 * chis);
     }
@@ -140,6 +148,9 @@ public:
         nodes_.reserve(sources.size());
         root_ = build(0, static_cast<int>(sources.size()), 0);
     }
+
+    // Radius queries emit a subsequence of this order, including after cuts.
+    int preorder_point(std::size_t i) const { return nodes_[i].point; }
 
     // ==========================================
     // Function: KDTree::radius

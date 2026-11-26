@@ -104,15 +104,19 @@ std::vector<int> spherical_regions(const std::vector<Point> &points, int regions
 LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
                           const std::vector<std::unique_ptr<bcg::PairStore>> &bins,
                           const Config &cfg, MPI_Comm comm) {
-    std::vector<unsigned char> active(lenses.size(), 0);
+    std::vector<std::uint64_t> active(bcg::lens_mask_words(lenses.size()), 0);
     for (const auto &bin : bins) {
         auto count = bin->count;
         MPI_Allreduce(MPI_IN_PLACE, &count, 1, MPI_INT64_T, MPI_SUM, comm);
-        if (count < cfg.pdf_bins + 2LL) continue;
-        for (std::size_t i = 0; i < active.size(); ++i) active[i] |= bin->present[i];
+        if (count >= cfg.pdf_bins + 2LL)
+            for (std::size_t i = 0; i < active.size(); ++i) active[i] |= bin->present[i];
+        std::vector<std::uint64_t>().swap(bin->present);
     }
     MPI_Allreduce(MPI_IN_PLACE, active.data(), static_cast<int>(active.size()),
-                  MPI_UNSIGNED_CHAR, MPI_MAX, comm);
+                  MPI_UINT64_T, MPI_BOR, comm);
+    const auto has_pairs = [&](std::size_t i) {
+        return (active[i / bcg::lenses_per_word] >> (i % bcg::lenses_per_word)) & std::uint64_t{1};
+    };
     LensStack stack;
     auto &sample = stack.sample;
     stack.labels.assign(lenses.size(), -1);
@@ -120,7 +124,7 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     std::size_t reliable = 0;
     const bool report_photometry = cfg.center == bcg::Center::bcg && cfg.lens_columns.galaxy.photometry_select != 0;
     for (std::size_t i = 0; i < lenses.size(); ++i) {
-        if (!active[i]) continue;
+        if (!has_pairs(i)) continue;
         const auto &lens = lenses[i];
         points.push_back(bcg::sky_xyz(lens.ra, lens.dec));
         sample.redshift += lens.z;
@@ -140,8 +144,8 @@ LensStack make_lens_stack(const std::vector<bcg::Lens> &lenses,
     if (sample.regions < 2) throw std::runtime_error("Lens sky positions cannot form jackknife regions");
     std::vector<int> counts(sample.regions);
     std::size_t pos = 0;
-    for (std::size_t i = 0; i < active.size(); ++i) {
-        if (!active[i]) continue;
+    for (std::size_t i = 0; i < lenses.size(); ++i) {
+        if (!has_pairs(i)) continue;
         stack.labels[i] = labels[pos++];
         ++counts[stack.labels[i]];
     }

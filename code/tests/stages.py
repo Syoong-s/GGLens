@@ -101,16 +101,60 @@ def load_measurement(path):
     return groups, z, stellar_mass, fields, edges, rows, replicas.reshape(2, n, regions)
 
 
+def repeat_lenses(inputs, prefix, copies, ra_step=0.0):
+    lens_count = len((inputs / "groups.dat").read_text().splitlines())
+    names = ("groups", "galaxies", "members")
+    (inputs / f"{prefix}-groups.list").write_text(
+        "# group_cat galaxy_cat member_cat\n1\n" + "".join(f"{prefix}-{name}.dat\n" for name in names)
+    )
+    for name in names:
+        original = (inputs / f"{name}.dat").read_text()
+        extra = []
+        for copy in range(1, copies):
+            for line in original.splitlines():
+                row = line.split()
+                row[0] = str(int(row[0]) + copy * lens_count)
+                if name == "galaxies" and ra_step:
+                    row[1] = str(float(row[1]) + copy * ra_step)
+                elif name == "members":
+                    row[1] = row[0]
+                extra.append(" ".join(row) + "\n")
+        (inputs / f"{prefix}-{name}.dat").write_text(original + "".join(extra))
+
+
+def check_streamed_pairs(root, run):
+    copies = 32
+    repeat_lenses(root / "inputs", "streamed", copies)
+    settings = CATALOG_SETTINGS.replace("inputs/groups.list", "inputs/streamed-groups.list").replace(
+        "n-r-bins = 7", "n-r-bins = 1"
+    )
+    snapshots = []
+    # The projected bin is just over 10 MiB, between the two cache limits.
+    for memory in (64, 128):
+        name = f"pairs-{memory}"
+        config = settings.replace("memory-mb = 64", f"memory-mb = {memory}")
+        run(name, f"[run]\nstage = measure\noutput-dir = {name}\noutput = sample.dat\n" + config)
+        snapshots.append(measurement_path(root / name))
+    assert snapshots[0].read_bytes() == snapshots[1].read_bytes()
+    _, _, _, _, _, rows, replicas = load_measurement(snapshots[0])
+    assert rows["count"][0] == 16 * 6 * 96 * copies
+    assert np.isfinite(replicas).all()
+
+
 def check_fd_points(root, run):
     inputs = root / "inputs"
     lens_ras = np.loadtxt(inputs / "galaxies.dat", usecols=1)
+    # A nearby lens lets the same FD source enter ESD in different radial bins.
+    repeat_lenses(inputs, "fd", 2, ra_step=-0.055)
     radial_bins = (0, 1, 3, 4, 5, 6)
     counts = np.array([2400, 0, 2400, 4, 2400])
     edges = np.linspace(-0.0015, 0.0015, len(counts) + 1)
     centers = (edges[:-1] + edges[1:]) / 2
     expected_counts = np.concatenate((counts, counts[::-1]))
     valid = expected_counts >= 6
-    settings = CATALOG_SETTINGS.replace("inputs/shear.list", "inputs/fd.list").replace(
+    settings = CATALOG_SETTINGS.replace("inputs/groups.list", "inputs/fd-groups.list").replace(
+        "inputs/shear.list", "inputs/fd.list"
+    ).replace(
         "self-calibrate = false", f"self-calibrate = true\nselfcal-fd-bins = {len(counts)}"
     )
     for name, gain2 in (("fd-valid", 0.9), ("fd-rejected", -0.9)):
@@ -141,6 +185,10 @@ def check_fd_points(root, run):
         assert np.all(np.isfinite(points["shear"][valid])) and np.all(points["sigma"][valid] > 0)
         assert np.all(np.isnan(points["shear"][~valid])) and np.all(np.isnan(points["sigma"][~valid]))
         assert snapshot.is_file() == (error is None)
+        if error is None:
+            groups, _, _, _, _, rows, _ = load_measurement(snapshot)
+            assert groups.sum() == 2 * len(lens_ras)
+            assert rows["count"].sum() == 2 * counts.sum() and rows["count"][2] > 0
 
 
 def check_fd_pull(root, run):
@@ -296,6 +344,7 @@ def main():
 
         check_lossless_codec(root)
         write_inputs(root / "inputs")
+        check_streamed_pairs(root, run)
         check_fd_points(root, run)
         combined = root / "combined"
         run("combined", "[run]\noutput-dir = combined\noutput = sample.dat\ncache = combined/cache/lenses.dat\n"

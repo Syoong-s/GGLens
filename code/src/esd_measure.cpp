@@ -23,27 +23,28 @@ Result measure_bin(bcg::PairStore &pairs, double low, double high, const LensSta
     out.effective = std::exp(global_logr / out.count);
     if (out.count < cfg.pdf_bins + 2LL) return out;
 
-    pairs.load_if_small(cfg.memory_bytes() / 2);
-    const auto measure = [&](int component, double &full, std::vector<double> &replicas) {
-        const auto pdf = bcg::prepare_replica_pdf(pairs, stack.labels, regions,
-                                                  component, cfg.pdf_bins, comm);
-        const auto estimates = bcg::fit_replica_pdf(pairs, stack.labels, component, pdf, comm);
-        full = estimates[0];
-        replicas.assign(estimates.begin() + 1, estimates.end());
-        if (component == 0) {
-            std::vector<std::int64_t> omitted;
-            for (int r = 0; r < regions; ++r) omitted.push_back(out.count - pdf.kept[r + 1]);
-            int rank = 0;
-            MPI_Comm_rank(comm, &rank);
-            if (!rank) {
-                const auto limits = std::minmax_element(omitted.begin(), omitted.end());
-                std::cout << "  Pairs removed per region: " << *limits.first << " to "
-                          << *limits.second << std::endl;
-            }
-        }
-    };
-    measure(0, out.measured, out.tangential_replicas);
-    measure(1, out.cross, out.cross_replicas);
+    // Both components share the histogram and cache allowance. The decoder
+    // separately keeps only one source chunk and one read buffer.
+    const auto budget = cfg.memory_bytes();
+    const auto histogram_bytes = 2 * (static_cast<std::uint64_t>(regions) + 1) *
+        bcg::pdf_histogram_bytes_per_slot(cfg.pdf_bins);
+    if (histogram_bytes > budget / 2)
+        throw std::runtime_error("Jackknife histograms exceed run.memory-mb budget");
+    const auto cache_bytes = budget / 2 - static_cast<std::size_t>(histogram_bytes);
+    pairs.prepare_scan(pairs.indexed() ? std::min(cache_bytes, budget / 8) : cache_bytes);
+    const auto pdf = bcg::prepare_replica_pdf(pairs, stack.labels, regions, cfg.pdf_bins, comm);
+    const auto estimates = bcg::fit_replica_pdf(pairs, stack.labels, pdf, comm);
+    out.measured = estimates[0][0];
+    out.cross = estimates[1][0];
+    out.tangential_replicas.assign(estimates[0].begin() + 1, estimates[0].end());
+    out.cross_replicas.assign(estimates[1].begin() + 1, estimates[1].end());
+    int rank = 0;
+    MPI_Comm_rank(comm, &rank);
+    if (!rank) {
+        const auto limits = std::minmax_element(pdf[0].kept.begin() + 1, pdf[0].kept.end());
+        std::cout << "  Pairs removed per region: " << out.count - *limits.second
+                  << " to " << out.count - *limits.first << std::endl;
+    }
     return out;
 }
 } // namespace bcg_esd

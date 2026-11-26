@@ -87,7 +87,8 @@ SelfCalibration::SelfCalibration(const Config &cfg, const bcg::ScratchSpace &scr
     for (int i = 0; i <= cfg.selfcal_fd_bins; ++i) edges_[i] = -limit + width * i;
     edges_.front() = -limit;
     edges_.back() = limit;
-    const auto bytes = cfg.memory_bytes()/16/(2*static_cast<std::size_t>(cfg.selfcal_fd_bins));
+    const auto bytes = std::min<std::size_t>(64 * 1024,
+        cfg.memory_bytes()/16/(2*static_cast<std::size_t>(cfg.selfcal_fd_bins)));
     for (int component = 0; component < 2; ++component) {
         field_sum_[component].assign(cfg.selfcal_fd_bins, 0);
         for (int bin = 0; bin < cfg.selfcal_fd_bins; ++bin)
@@ -111,7 +112,7 @@ void SelfCalibration::append(const bcg::Source &source) {
         const auto bin = static_cast<std::size_t>(std::upper_bound(edges_.begin(), edges_.end(), field)-edges_.begin()-1);
         const double g = component ? source.g2 : source.g1;
         const double response = component ? source.de+source.h1 : source.de-source.h1;
-        cells_[component][bin]->append({g, 0, response, 0, 0, 0}, 1, 0);
+        cells_[component][bin]->append({g, 0, response, 0, 0}, 1, 0);
         field_sum_[component][bin] += field;
     }
 }
@@ -135,7 +136,7 @@ bcg::ShearCalibration SelfCalibration::finish(MPI_Comm comm) {
             MPI_Allreduce(&field_sum_[component][bin], &sum, 1, MPI_DOUBLE, MPI_SUM, comm);
             if (point.count) point.field = sum/point.count;
             if (point.count >= cfg_.selfcal_min_count) {
-                cell.load_if_small(cfg_.memory_bytes()/4);
+                cell.prepare_scan(cfg_.memory_bytes()/4);
                 const auto fit = selfcal_fd_pdf(cell, cfg_.selfcal_pdf_bins, cfg_.selfcal_min_count,
                     cfg_.selfcal_search_width, scratch_, cfg_.memory_bytes()/8, comm);
                 point.status = fit.valid ? 0 : 2;

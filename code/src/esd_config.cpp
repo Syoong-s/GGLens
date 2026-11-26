@@ -1,4 +1,5 @@
 #include "bcg_esd.hpp"
+#include "bcg_jackknife.hpp"
 #include <iostream>
 #include <iterator>
 #include <variant>
@@ -258,9 +259,7 @@ void validate_measurement_config(Config &c) {
     const auto budget = c.memory_bytes();
     if ((limit_duplicates && static_cast<std::uint64_t>(cuts.max_dup) * sizeof(bcg::ShearRow) > budget / 16) ||
         static_cast<std::uint64_t>(c.pdf_bins + 1LL) * 3200 > budget / 16 ||
-        static_cast<std::uint64_t>(c.n_jack + 1LL) * 2049 * sizeof(std::int64_t) > budget / 4 ||
-        static_cast<std::uint64_t>(c.n_jack + 1LL) * (c.pdf_bins + 1LL) * 4 * 61 * sizeof(std::int64_t)
-            > budget / 4 ||
+        static_cast<std::uint64_t>(c.n_jack + 1) > budget / 4 / bcg::pdf_histogram_bytes_per_slot(c.pdf_bins) ||
         static_cast<std::uint64_t>(c.n_r_bins) * 16384 > budget / 8 || c.n_r_bins > max_radial_bins)
         throw std::runtime_error("Bin/replica/duplicate configuration exceeds memory or open-file budget");
     if (c.self_calibrate) {
